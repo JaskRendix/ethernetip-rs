@@ -1,0 +1,42 @@
+# Cargo build artifacts
+/target/
+/debug/
+/release/
+
+# Cargo package metadata
+**/*.rs.bk
+
+# For binaries, it's fine to ignore it.
+
+# Rustfmt backups
+**/*.rs.bk
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Coverage / profiling
+coverage/
+profdata/
+*.profraw
+*.profdata
+
+# Rust Analyzer
+rust-project.json
+
+# Misc
+*.old
+*.bak
