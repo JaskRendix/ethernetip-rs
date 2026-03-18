@@ -153,10 +153,10 @@ impl EthernetIpClient {
 
         let general_status = data[status_offset];
         if general_status != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("CIP write failed with status 0x{:02X}", general_status),
-            ));
+            return Err(io::Error::other(format!(
+                "CIP write failed with status 0x{:02X}",
+                general_status
+            )));
         }
 
         Ok(())
@@ -201,10 +201,10 @@ impl EthernetIpClient {
 
         let general_status = data[status_offset];
         if general_status != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("CIP write failed with status 0x{:02X}", general_status),
-            ));
+            return Err(io::Error::other(format!(
+                "CIP write failed with status 0x{:02X}",
+                general_status
+            )));
         }
 
         Ok(())
@@ -256,13 +256,10 @@ impl EthernetIpClient {
 
         let general_status = data[status_offset];
         if general_status != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "CIP write fragment failed with status 0x{:02X}",
-                    general_status
-                ),
-            ));
+            return Err(io::Error::other(format!(
+                "CIP write fragment failed with status 0x{:02X}",
+                general_status
+            )));
         }
 
         Ok(())

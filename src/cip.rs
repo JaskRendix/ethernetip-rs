@@ -71,7 +71,7 @@ pub fn encode_epath(tag: &str) -> Vec<u8> {
     }
 
     // Prepend size in words
-    let size_in_words = ((buf.len() + 1) / 2) as u8;
+    let size_in_words = buf.len().div_ceil(2) as u8;
     let mut out = Vec::with_capacity(1 + buf.len());
     out.push(size_in_words);
     out.extend_from_slice(&buf);

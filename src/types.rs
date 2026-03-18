@@ -59,8 +59,8 @@ pub enum MultiResult {
 impl CipValue {
     pub fn from_bytes(typ: CipType, data: &[u8]) -> Option<Self> {
         match typ {
-            CipType::Bool => Some(CipValue::Bool(*data.get(0)? != 0)),
-            CipType::SInt => Some(CipValue::SInt(*data.get(0)? as i8)),
+            CipType::Bool => Some(CipValue::Bool(*data.first()? != 0)),
+            CipType::SInt => Some(CipValue::SInt(*data.first()? as i8)),
             CipType::Int => Some(CipValue::Int(i16::from_le_bytes(
                 data.get(0..2)?.try_into().ok()?,
             ))),
