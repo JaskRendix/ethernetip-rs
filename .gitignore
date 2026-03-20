@@ -36,6 +36,7 @@ profdata/
 
 # Rust Analyzer
 rust-project.json
+Cargo.lock
 
 # Misc
 *.old

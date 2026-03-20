@@ -1,6 +1,8 @@
 use std::convert::TryInto;
 
+pub const COMMAND_LIST_IDENTITY: u16 = 0x0063;
 pub const COMMAND_REGISTER_SESSION: u16 = 0x0065;
+pub const COMMAND_UNREGISTER_SESSION: u16 = 0x0066;
 pub const COMMAND_SEND_RR_DATA: u16 = 0x006F;
 
 #[derive(Debug, Clone)]
@@ -27,8 +29,8 @@ impl EncapsulationHeader {
         }
     }
 
-    pub fn to_bytes(&self) -> [u8; Self::SIZE] {
-        let mut buf = [0u8; Self::SIZE];
+    pub fn to_bytes(&self) -> [u8; 24] {
+        let mut buf = [0u8; 24];
         buf[0..2].copy_from_slice(&self.command.to_le_bytes());
         buf[2..4].copy_from_slice(&self.length.to_le_bytes());
         buf[4..8].copy_from_slice(&self.session.to_le_bytes());
@@ -39,7 +41,7 @@ impl EncapsulationHeader {
     }
 
     pub fn from_bytes(buf: &[u8]) -> Option<Self> {
-        if buf.len() < Self::SIZE {
+        if buf.len() < 24 {
             return None;
         }
         Some(Self {
