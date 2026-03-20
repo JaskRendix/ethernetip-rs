@@ -2,7 +2,7 @@
 pub enum CipType {
     Bool = 0xC1,
     SInt = 0xC2,
-    Int  = 0xC3,
+    Int = 0xC3,
     DInt = 0xC4,
     Real = 0xCA,
 }
@@ -20,11 +20,29 @@ impl CipType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CipValue {
     Bool(bool),
     SInt(i8),
     Int(i16),
     DInt(i32),
     Real(f32),
+    Unit,
+}
+
+/// Result type used by CIP Multiple Service Packet (MSP) responses.
+///
+/// - `Ok(T)` contains a successfully decoded CIP value.
+/// - `Err(u8)` contains the CIP general status byte.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MultiResult<T> {
+    Ok(T),
+    Err(u8),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SymbolInfo {
+    pub name: String,
+    pub typ: CipType,
+    pub array_dims: Option<(u16, u16, u16)>, // up to 3D, unused dims = 0
 }

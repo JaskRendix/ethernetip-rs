@@ -1,413 +1,178 @@
 use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UdpSocket};
+use tokio::time::{timeout, Duration};
 
-use crate::cip::{
-    build_cip_multiple_service_request, build_cip_request, build_cip_request_with_slot,
-    build_cip_write_array, build_cip_write_fragment, parse_cip_multiple_service_response,
-    CipService,
-};
-use crate::encapsulation::{EncapsulationHeader, COMMAND_REGISTER_SESSION, COMMAND_SEND_RR_DATA};
-use crate::types::{CipValue, MultiResult};
+use crate::cip::*;
+use crate::encapsulation::*;
+use crate::types::*;
 
 pub struct EthernetIpClient {
-    stream: TcpStream,
-    session: u32,
-    slot: Option<u8>,
+    pub stream: TcpStream,
+    pub session: u32,
 }
 
 impl EthernetIpClient {
-    pub async fn connect(host: &str, port: u16) -> io::Result<Self> {
-        let addr = format!("{}:{}", host, port);
-        let mut stream = TcpStream::connect(addr).await?;
+    pub async fn browse_symbols(&mut self) -> io::Result<Vec<SymbolInfo>> {
+        let cip = build_symbol_browse_request();
+        let res = self.send_rr_data(cip).await?;
 
-        let session = register_session(&mut stream).await?;
+        let general_status = res[2];
+        if general_status != 0 {
+            return Err(io::Error::other(format!(
+                "PLC returned error 0x{:02X} for symbol browse",
+                general_status
+            )));
+        }
+
+        let ext_words = res[3] as usize;
+        let data_start = 4 + ext_words * 2;
+
+        let symbols = parse_symbol_browse_response(&res[data_start..]);
+        Ok(symbols)
+    }
+
+    pub async fn discover() -> io::Result<Vec<(String, String)>> {
+        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        socket.set_broadcast(true)?;
+
+        let msg = EncapsulationHeader::new(COMMAND_LIST_IDENTITY, 0, 0).to_bytes();
+        socket.send_to(&msg, "255.255.255.255:44818").await?;
+
+        let mut results = Vec::new();
+        let mut buf = [0u8; 1024];
+        let start = std::time::Instant::now();
+
+        while start.elapsed() < Duration::from_secs(1) {
+            if let Ok(Ok((len, addr))) =
+                timeout(Duration::from_millis(200), socket.recv_from(&mut buf)).await
+            {
+                if len > 44 {
+                    let name_len = buf[44] as usize;
+                    let name = String::from_utf8_lossy(&buf[45..45 + name_len]).into_owned();
+                    results.push((addr.ip().to_string(), name));
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    pub async fn connect(ip: &str) -> io::Result<Self> {
+        let mut stream = TcpStream::connect(format!("{}:44818", ip)).await?;
+
+        let mut reg = EncapsulationHeader::new(COMMAND_REGISTER_SESSION, 4, 0)
+            .to_bytes()
+            .to_vec();
+        reg.extend_from_slice(&1u16.to_le_bytes());
+        reg.extend_from_slice(&0u16.to_le_bytes());
+
+        stream.write_all(&reg).await?;
+
+        let mut h_buf = [0u8; 24];
+        stream.read_exact(&mut h_buf).await?;
+        let hdr =
+            EncapsulationHeader::from_bytes(&h_buf).ok_or(io::Error::other("Handshake failed"))?;
+
+        let mut s_buf = [0u8; 4];
+        stream.read_exact(&mut s_buf).await?;
+
         Ok(Self {
             stream,
-            session,
-            slot: None,
+            session: hdr.session,
         })
     }
 
-    pub fn set_slot(&mut self, slot: u8) {
-        self.slot = Some(slot);
+    pub fn parse_cpf(data: &[u8]) -> io::Result<&[u8]> {
+        if data.len() < 10 {
+            return Err(io::Error::other("Data too short"));
+        }
+
+        let item_count = u16::from_le_bytes([data[6], data[7]]);
+        let mut pos = 8;
+
+        for _ in 0..item_count {
+            if data.len() < pos + 4 {
+                break;
+            }
+
+            let type_id = u16::from_le_bytes([data[pos], data[pos + 1]]);
+            let len = u16::from_le_bytes([data[pos + 2], data[pos + 3]]) as usize;
+            pos += 4;
+
+            if type_id == 0x00B2 {
+                return Ok(&data[pos..pos + len]);
+            }
+
+            pos += len;
+        }
+
+        Err(io::Error::other("No CIP data item found"))
     }
 
-    pub async fn read_tag(&mut self, tag: &str) -> io::Result<Option<CipValue>> {
-        let cip = if let Some(slot) = self.slot {
-            build_cip_request_with_slot(CipService::ReadData, tag, Some(slot), None, Some(1))
-        } else {
-            build_cip_request(CipService::ReadData, tag, None, Some(1))
-        };
+    pub async fn read_tag(&mut self, tag: &str) -> io::Result<CipValue> {
+        let cip = build_read_request(tag);
 
-        let mut cmd_data = Vec::new();
-        cmd_data.extend_from_slice(&0u32.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&2u16.to_le_bytes());
+        self.send_rr_data(cip).await.and_then(|res| {
+            let general_status = res[2];
+            if general_status != 0 {
+                return Err(io::Error::other(format!(
+                    "PLC returned error 0x{:02X}",
+                    general_status
+                )));
+            }
 
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
+            let ext_words = res[3] as usize;
+            let data_start = 4 + ext_words * 2;
 
-        cmd_data.extend_from_slice(&0x00B2u16.to_le_bytes());
-        cmd_data.extend_from_slice(&(cip.len() as u16).to_le_bytes());
-        cmd_data.extend_from_slice(&cip);
-
-        let header =
-            EncapsulationHeader::new(COMMAND_SEND_RR_DATA, cmd_data.len() as u16, self.session);
-        let mut packet = Vec::with_capacity(EncapsulationHeader::SIZE + cmd_data.len());
-        packet.extend_from_slice(&header.to_bytes());
-        packet.extend_from_slice(&cmd_data);
-
-        self.stream.write_all(&packet).await?;
-
-        let mut hdr_buf = [0u8; EncapsulationHeader::SIZE];
-        self.stream.read_exact(&mut hdr_buf).await?;
-        let hdr = EncapsulationHeader::from_bytes(&hdr_buf).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "Invalid encapsulation header")
-        })?;
-
-        if hdr.length == 0 {
-            return Ok(None);
-        }
-
-        let mut data = vec![0u8; hdr.length as usize];
-        self.stream.read_exact(&mut data).await?;
-
-        if data.len() < 4 + 2 + 2 + 4 + 4 {
-            return Ok(None);
-        }
-        let cip_offset = 4 + 2 + 2 + 4 + 4;
-        if data.len() <= cip_offset {
-            return Ok(None);
-        }
-        let cip_payload = &data[cip_offset..];
-
-        if cip_payload.len() < 2 {
-            return Ok(None);
-        }
-
-        let path_size_words = cip_payload[1] as usize;
-        let path_bytes = path_size_words * 2;
-        let data_offset = 2 + path_bytes;
-        if cip_payload.len() <= data_offset {
-            return Ok(None);
-        }
-        let value_bytes = &cip_payload[data_offset..];
-
-        Ok(crate::cip::decode_cip_response(value_bytes))
+            decode_cip_response(&res[data_start..]).ok_or(io::Error::other("Decode error"))
+        })
     }
 
     pub async fn write_tag(&mut self, tag: &str, value: CipValue) -> io::Result<()> {
-        let cip = if let Some(slot) = self.slot {
-            build_cip_request_with_slot(
-                CipService::WriteData,
-                tag,
-                Some(slot),
-                Some(&value),
-                Some(1),
-            )
-        } else {
-            build_cip_request(CipService::WriteData, tag, Some(&value), Some(1))
-        };
+        let cip = build_write_request(tag, &value);
 
-        let mut cmd_data = Vec::new();
-        cmd_data.extend_from_slice(&0u32.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&2u16.to_le_bytes());
+        let res = self.send_rr_data(cip).await?;
 
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
+        decode_write_response(&res).map_err(|status| {
+            io::Error::other(format!("PLC returned write error 0x{:02X}", status))
+        })
+    }
 
-        cmd_data.extend_from_slice(&0x00B2u16.to_le_bytes());
-        cmd_data.extend_from_slice(&(cip.len() as u16).to_le_bytes());
-        cmd_data.extend_from_slice(&cip);
+    async fn send_rr_data(&mut self, cip: Vec<u8>) -> io::Result<Vec<u8>> {
+        let mut rr = Vec::new();
+        rr.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+        rr.extend_from_slice(&2u16.to_le_bytes());
+        rr.extend_from_slice(&[0, 0, 0, 0]);
+        rr.extend_from_slice(&0x00B2u16.to_le_bytes());
+        rr.extend_from_slice(&(cip.len() as u16).to_le_bytes());
+        rr.extend(cip);
 
-        let header =
-            EncapsulationHeader::new(COMMAND_SEND_RR_DATA, cmd_data.len() as u16, self.session);
+        let pkt = EncapsulationHeader::new(COMMAND_SEND_RR_DATA, rr.len() as u16, self.session)
+            .to_bytes()
+            .to_vec();
 
-        let mut packet = Vec::new();
-        packet.extend_from_slice(&header.to_bytes());
-        packet.extend_from_slice(&cmd_data);
+        timeout(Duration::from_secs(3), async {
+            self.stream.write_all(&pkt).await?;
+            self.stream.write_all(&rr).await?;
 
-        self.stream.write_all(&packet).await?;
+            let mut h_buf = [0u8; 24];
+            self.stream.read_exact(&mut h_buf).await?;
+            let h = EncapsulationHeader::from_bytes(&h_buf).unwrap();
 
-        let mut hdr_buf = [0u8; EncapsulationHeader::SIZE];
-        self.stream.read_exact(&mut hdr_buf).await?;
-        let hdr = EncapsulationHeader::from_bytes(&hdr_buf)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid header"))?;
+            let mut d = vec![0u8; h.length as usize];
+            self.stream.read_exact(&mut d).await?;
 
-        let mut data = vec![0u8; hdr.length as usize];
-        self.stream.read_exact(&mut data).await?;
+            let res = Self::parse_cpf(&d)?;
+            Ok(res.to_vec())
+        })
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "PLC Timeout"))?
+    }
 
-        let cip_offset = 4 + 2 + 2 + 4 + 4;
-        if data.len() < cip_offset + 4 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "CIP response too short",
-            ));
-        }
-
-        let path_size_words = data[cip_offset + 1] as usize;
-        let path_bytes = path_size_words * 2;
-        let status_offset = cip_offset + 2 + path_bytes;
-
-        let general_status = data[status_offset];
-        if general_status != 0 {
-            return Err(io::Error::other(format!(
-                "CIP write failed with status 0x{:02X}",
-                general_status
-            )));
-        }
-
+    pub async fn close(mut self) -> io::Result<()> {
+        let pkt = EncapsulationHeader::new(COMMAND_UNREGISTER_SESSION, 0, self.session).to_bytes();
+        self.stream.write_all(&pkt).await?;
         Ok(())
     }
-
-    pub async fn write_array_tag(&mut self, tag: &str, value: CipValue) -> io::Result<()> {
-        let cip = build_cip_write_array(tag, &value);
-
-        let mut cmd_data = Vec::new();
-        cmd_data.extend_from_slice(&0u32.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&2u16.to_le_bytes());
-
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-
-        cmd_data.extend_from_slice(&0x00B2u16.to_le_bytes());
-        cmd_data.extend_from_slice(&(cip.len() as u16).to_le_bytes());
-        cmd_data.extend_from_slice(&cip);
-
-        let header =
-            EncapsulationHeader::new(COMMAND_SEND_RR_DATA, cmd_data.len() as u16, self.session);
-
-        let mut packet = Vec::new();
-        packet.extend_from_slice(&header.to_bytes());
-        packet.extend_from_slice(&cmd_data);
-
-        self.stream.write_all(&packet).await?;
-
-        let mut hdr_buf = [0u8; EncapsulationHeader::SIZE];
-        self.stream.read_exact(&mut hdr_buf).await?;
-        let hdr = EncapsulationHeader::from_bytes(&hdr_buf)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid header"))?;
-
-        let mut data = vec![0u8; hdr.length as usize];
-        self.stream.read_exact(&mut data).await?;
-
-        let cip_offset = 4 + 2 + 2 + 4 + 4;
-        let path_size_words = data[cip_offset + 1] as usize;
-        let path_bytes = path_size_words * 2;
-        let status_offset = cip_offset + 2 + path_bytes;
-
-        let general_status = data[status_offset];
-        if general_status != 0 {
-            return Err(io::Error::other(format!(
-                "CIP write failed with status 0x{:02X}",
-                general_status
-            )));
-        }
-
-        Ok(())
-    }
-
-    pub async fn write_array_fragment(
-        &mut self,
-        tag: &str,
-        value: CipValue,
-        array_size: u16,
-        start_index: u32,
-        write_count: u16,
-    ) -> io::Result<()> {
-        let cip = build_cip_write_fragment(tag, &value, array_size, start_index, write_count);
-
-        let mut cmd_data = Vec::new();
-        cmd_data.extend_from_slice(&0u32.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&2u16.to_le_bytes());
-
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-
-        cmd_data.extend_from_slice(&0x00B2u16.to_le_bytes());
-        cmd_data.extend_from_slice(&(cip.len() as u16).to_le_bytes());
-        cmd_data.extend_from_slice(&cip);
-
-        let header =
-            EncapsulationHeader::new(COMMAND_SEND_RR_DATA, cmd_data.len() as u16, self.session);
-
-        let mut packet = Vec::new();
-        packet.extend_from_slice(&header.to_bytes());
-        packet.extend_from_slice(&cmd_data);
-
-        self.stream.write_all(&packet).await?;
-
-        let mut hdr_buf = [0u8; EncapsulationHeader::SIZE];
-        self.stream.read_exact(&mut hdr_buf).await?;
-        let hdr = EncapsulationHeader::from_bytes(&hdr_buf)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid header"))?;
-
-        let mut data = vec![0u8; hdr.length as usize];
-        self.stream.read_exact(&mut data).await?;
-
-        let cip_offset = 4 + 2 + 2 + 4 + 4;
-        let path_size_words = data[cip_offset + 1] as usize;
-        let path_bytes = path_size_words * 2;
-        let status_offset = cip_offset + 2 + path_bytes;
-
-        let general_status = data[status_offset];
-        if general_status != 0 {
-            return Err(io::Error::other(format!(
-                "CIP write fragment failed with status 0x{:02X}",
-                general_status
-            )));
-        }
-
-        Ok(())
-    }
-
-    pub async fn read_tags_multi(&mut self, tags: &[&str]) -> io::Result<Vec<MultiResult>> {
-        let mut requests = Vec::new();
-        for tag in tags {
-            let cip = if let Some(slot) = self.slot {
-                build_cip_request_with_slot(CipService::ReadData, tag, Some(slot), None, Some(1))
-            } else {
-                build_cip_request(CipService::ReadData, tag, None, Some(1))
-            };
-            requests.push(cip);
-        }
-
-        let msp = build_cip_multiple_service_request(&requests);
-
-        let mut cmd_data = Vec::new();
-        cmd_data.extend_from_slice(&0u32.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&2u16.to_le_bytes());
-
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-
-        cmd_data.extend_from_slice(&0x00B2u16.to_le_bytes());
-        cmd_data.extend_from_slice(&(msp.len() as u16).to_le_bytes());
-        cmd_data.extend_from_slice(&msp);
-
-        let header =
-            EncapsulationHeader::new(COMMAND_SEND_RR_DATA, cmd_data.len() as u16, self.session);
-
-        let mut packet = Vec::new();
-        packet.extend_from_slice(&header.to_bytes());
-        packet.extend_from_slice(&cmd_data);
-
-        self.stream.write_all(&packet).await?;
-
-        let mut hdr_buf = [0u8; EncapsulationHeader::SIZE];
-        self.stream.read_exact(&mut hdr_buf).await?;
-        let hdr = EncapsulationHeader::from_bytes(&hdr_buf)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid header"))?;
-
-        let mut data = vec![0u8; hdr.length as usize];
-        self.stream.read_exact(&mut data).await?;
-
-        let cip_offset = 4 + 2 + 2 + 4 + 4;
-        let msp_response = &data[cip_offset..];
-
-        Ok(parse_cip_multiple_service_response(msp_response))
-    }
-
-    pub async fn write_tags_multi(
-        &mut self,
-        tags_and_values: &[(&str, CipValue)],
-    ) -> io::Result<Vec<MultiResult>> {
-        let mut requests = Vec::new();
-        for (tag, value) in tags_and_values {
-            let cip = if let Some(slot) = self.slot {
-                build_cip_request_with_slot(
-                    CipService::WriteData,
-                    tag,
-                    Some(slot),
-                    Some(value),
-                    Some(1),
-                )
-            } else {
-                build_cip_request(CipService::WriteData, tag, Some(value), Some(1))
-            };
-            requests.push(cip);
-        }
-
-        let msp = build_cip_multiple_service_request(&requests);
-
-        let mut cmd_data = Vec::new();
-        cmd_data.extend_from_slice(&0u32.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&2u16.to_le_bytes());
-
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-        cmd_data.extend_from_slice(&0u16.to_le_bytes());
-
-        cmd_data.extend_from_slice(&0x00B2u16.to_le_bytes());
-        cmd_data.extend_from_slice(&(msp.len() as u16).to_le_bytes());
-        cmd_data.extend_from_slice(&msp);
-
-        let header =
-            EncapsulationHeader::new(COMMAND_SEND_RR_DATA, cmd_data.len() as u16, self.session);
-
-        let mut packet = Vec::new();
-        packet.extend_from_slice(&header.to_bytes());
-        packet.extend_from_slice(&cmd_data);
-
-        self.stream.write_all(&packet).await?;
-
-        let mut hdr_buf = [0u8; EncapsulationHeader::SIZE];
-        self.stream.read_exact(&mut hdr_buf).await?;
-        let hdr = EncapsulationHeader::from_bytes(&hdr_buf)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid header"))?;
-
-        let mut data = vec![0u8; hdr.length as usize];
-        self.stream.read_exact(&mut data).await?;
-
-        let cip_offset = 4 + 2 + 2 + 4 + 4;
-        let msp_response = &data[cip_offset..];
-
-        Ok(parse_cip_multiple_service_response(msp_response))
-    }
-}
-
-async fn register_session(stream: &mut TcpStream) -> io::Result<u32> {
-    let mut cmd_data = Vec::new();
-    cmd_data.extend_from_slice(&1u16.to_le_bytes());
-    cmd_data.extend_from_slice(&0u16.to_le_bytes());
-
-    let header = EncapsulationHeader::new(COMMAND_REGISTER_SESSION, cmd_data.len() as u16, 0);
-    let mut packet = Vec::with_capacity(EncapsulationHeader::SIZE + cmd_data.len());
-    packet.extend_from_slice(&header.to_bytes());
-    packet.extend_from_slice(&cmd_data);
-
-    stream.write_all(&packet).await?;
-
-    let mut hdr_buf = [0u8; EncapsulationHeader::SIZE];
-    stream.read_exact(&mut hdr_buf).await?;
-    let hdr = EncapsulationHeader::from_bytes(&hdr_buf).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Invalid register session header",
-        )
-    })?;
-
-    if hdr.length < 4 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Register session response too short",
-        ));
-    }
-
-    let mut data = vec![0u8; hdr.length as usize];
-    stream.read_exact(&mut data).await?;
-
-    if data.len() < 4 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Register session data too short",
-        ));
-    }
-    let session = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-    Ok(session)
 }

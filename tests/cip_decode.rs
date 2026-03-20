@@ -1,4 +1,5 @@
-use ethernetip::cip::{decode_cip_response, CipValue};
+use ethernetip::cip::decode_cip_response;
+use ethernetip::CipValue;
 
 #[test]
 fn decode_bool_true() {
