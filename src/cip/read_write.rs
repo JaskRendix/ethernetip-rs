@@ -1,38 +1,22 @@
+use crate::cip::epath::encode_epath_with_slot;
 use crate::types::{CipType, CipValue};
 
-pub fn build_read_request(tag: &str) -> Vec<u8> {
-    let mut path = Vec::new();
-    path.push(0x91);
-    path.push(tag.len() as u8);
-    path.extend_from_slice(tag.as_bytes());
-    if !tag.len().is_multiple_of(2) {
-        path.push(0x00);
-    }
+pub fn build_read_request(tag: &str, slot: Option<u8>) -> Vec<u8> {
+    let epath = encode_epath_with_slot(tag, slot);
 
     let mut cip = Vec::new();
-    cip.push(0x4C);
-    cip.push((path.len() / 2) as u8);
-    cip.extend(path);
-    cip.extend_from_slice(&1u16.to_le_bytes());
+    cip.push(0x4C); // Read Tag service
+    cip.extend(epath);
+    cip.extend_from_slice(&1u16.to_le_bytes()); // element count
     cip
 }
 
-pub fn build_write_request(tag: &str, value: &CipValue) -> Vec<u8> {
-    let mut path = Vec::new();
-    path.push(0x91);
-    path.push(tag.len() as u8);
-    path.extend_from_slice(tag.as_bytes());
-
-    let path_words = tag.len().div_ceil(2) as u8;
-
-    if !tag.len().is_multiple_of(2) {
-        path.push(0x00);
-    }
+pub fn build_write_request(tag: &str, value: &CipValue, slot: Option<u8>) -> Vec<u8> {
+    let epath = encode_epath_with_slot(tag, slot);
 
     let mut cip = Vec::new();
-    cip.push(0x4D);
-    cip.push(path_words);
-    cip.extend_from_slice(&path);
+    cip.push(0x4D); // Write Tag service
+    cip.extend(epath);
 
     match value {
         CipValue::Bool(v) => {
@@ -62,6 +46,5 @@ pub fn build_write_request(tag: &str, value: &CipValue) -> Vec<u8> {
         }
         CipValue::Unit => {}
     }
-
     cip
 }

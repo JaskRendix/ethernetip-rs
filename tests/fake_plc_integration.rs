@@ -80,7 +80,7 @@ fn decode_real() {
 
 #[test]
 fn read_request_encoding() {
-    let cip = build_read_request("Test");
+    let cip = build_read_request("Test", None);
 
     assert_eq!(cip[0], 0x4C);
     assert_eq!(cip[1], 3);
@@ -92,10 +92,10 @@ fn read_request_encoding() {
 
 #[test]
 fn write_request_encoding() {
-    let cip = build_write_request("Tag", &CipValue::DInt(123));
+    let cip = build_write_request("Tag", &CipValue::DInt(123), None);
 
     assert_eq!(cip[0], 0x4D);
-    assert_eq!(cip[1], 2);
+    assert_eq!(cip[1], 3);
     assert_eq!(cip[2], 0x91);
     assert_eq!(cip[3], 3);
     assert_eq!(&cip[4..7], b"Tag");
@@ -131,7 +131,7 @@ fn encode_multi_index() {
     let e = encode_epath("A[1,2]");
     assert_eq!(
         e,
-        vec![0x05, 0x91, 0x01, b'A', 0x00, 0x28, 0x01, 0x28, 0x02]
+        vec![0x04, 0x91, 0x01, b'A', 0x00, 0x28, 0x01, 0x28, 0x02]
     );
 }
 
@@ -153,7 +153,11 @@ fn encode_epath_with_slot_test() {
 
     assert_eq!(
         e,
-        vec![0x01, 0x03, 0x00, 0x03, 0x91, 0x03, b'T', b'a', b'g', 0x00]
+        vec![
+            0x05, // 5 words
+            0x01, 0x03, 0x00, 0x00, // correct 4‑byte port segment
+            0x91, 0x03, b'T', b'a', b'g', 0x00
+        ]
     );
 }
 

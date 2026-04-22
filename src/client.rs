@@ -8,8 +8,9 @@ use crate::encapsulation::*;
 use crate::types::*;
 
 pub struct EthernetIpClient {
-    pub stream: TcpStream,
-    pub session: u32,
+    stream: TcpStream,
+    session: u32,
+    slot: Option<u8>,
 }
 
 impl EthernetIpClient {
@@ -97,7 +98,12 @@ impl EthernetIpClient {
         Ok(Self {
             stream,
             session: hdr.session,
+            slot: None, // missing
         })
+    }
+
+    pub fn set_slot(&mut self, slot: u8) {
+        self.slot = Some(slot);
     }
 
     pub fn parse_cpf(data: &[u8]) -> io::Result<&[u8]> {
@@ -128,7 +134,7 @@ impl EthernetIpClient {
     }
 
     pub async fn read_tag(&mut self, tag: &str) -> io::Result<CipValue> {
-        let cip = build_read_request(tag);
+        let cip = build_read_request(tag, self.slot);
 
         self.send_rr_data(cip).await.and_then(|res| {
             let general_status = res[2];
@@ -147,7 +153,7 @@ impl EthernetIpClient {
     }
 
     pub async fn write_tag(&mut self, tag: &str, value: CipValue) -> io::Result<()> {
-        let cip = build_write_request(tag, &value);
+        let cip = build_write_request(tag, &value, self.slot);
 
         let res = self.send_rr_data(cip).await?;
 
