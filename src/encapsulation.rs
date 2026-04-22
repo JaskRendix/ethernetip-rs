@@ -29,8 +29,8 @@ impl EncapsulationHeader {
         }
     }
 
-    pub fn to_bytes(&self) -> [u8; 24] {
-        let mut buf = [0u8; 24];
+    pub fn to_bytes(&self) -> [u8; Self::SIZE] {
+        let mut buf = [0u8; Self::SIZE];
         buf[0..2].copy_from_slice(&self.command.to_le_bytes());
         buf[2..4].copy_from_slice(&self.length.to_le_bytes());
         buf[4..8].copy_from_slice(&self.session.to_le_bytes());
@@ -41,11 +41,25 @@ impl EncapsulationHeader {
     }
 
     pub fn from_bytes(buf: &[u8]) -> Option<Self> {
-        if buf.len() < 24 {
+        if buf.len() < Self::SIZE {
             return None;
         }
+
+        let command = u16::from_le_bytes(buf[0..2].try_into().ok()?);
+
+        // reject unknown commands
+        if !matches!(
+            command,
+            COMMAND_LIST_IDENTITY
+                | COMMAND_REGISTER_SESSION
+                | COMMAND_UNREGISTER_SESSION
+                | COMMAND_SEND_RR_DATA
+        ) {
+            return None;
+        }
+
         Some(Self {
-            command: u16::from_le_bytes(buf[0..2].try_into().ok()?),
+            command,
             length: u16::from_le_bytes(buf[2..4].try_into().ok()?),
             session: u32::from_le_bytes(buf[4..8].try_into().ok()?),
             status: u32::from_le_bytes(buf[8..12].try_into().ok()?),
