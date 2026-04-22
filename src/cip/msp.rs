@@ -2,15 +2,19 @@ use crate::cip::decode_cip_response;
 use crate::types::{CipValue, MultiResult};
 
 pub fn build_cip_multiple_service_request(requests: &[Vec<u8>]) -> Vec<u8> {
-    let mut out = Vec::new();
+    let count = requests.len();
+    let header_len = 2 + 2 + count * 2;
+
+    let total_payload: usize = requests.iter().map(|r| r.len()).sum();
+    let mut out = Vec::with_capacity(header_len + total_payload);
 
     out.push(0x0A);
     out.push(0x00);
 
-    out.extend_from_slice(&(requests.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(count as u16).to_le_bytes());
 
-    let mut offsets = Vec::new();
-    let mut current_offset = 2 + 2 + (requests.len() * 2) as u16;
+    let mut offsets = Vec::with_capacity(count);
+    let mut current_offset = header_len as u16;
 
     for req in requests {
         offsets.push(current_offset);
@@ -37,6 +41,10 @@ pub fn parse_cip_multiple_service_response(buf: &[u8]) -> Vec<MultiResult<CipVal
 
     let count = u16::from_le_bytes([buf[2], buf[3]]) as usize;
 
+    if count == 0 || count > 64 {
+        return results;
+    }
+
     let offsets_start = 4;
     let offsets_end = offsets_start + count * 2;
     if buf.len() < offsets_end {
@@ -47,6 +55,19 @@ pub fn parse_cip_multiple_service_response(buf: &[u8]) -> Vec<MultiResult<CipVal
     for i in 0..count {
         let o = offsets_start + i * 2;
         offsets.push(u16::from_le_bytes([buf[o], buf[o + 1]]) as usize);
+    }
+
+    for w in offsets.windows(2) {
+        if w[1] < w[0] {
+            results.resize(count, MultiResult::Err(0xFF));
+            return results;
+        }
+    }
+    for off in &offsets {
+        if *off < offsets_end {
+            results.push(MultiResult::Err(0xFF));
+            continue;
+        }
     }
 
     for off in offsets {
@@ -75,7 +96,7 @@ pub fn parse_cip_multiple_service_response(buf: &[u8]) -> Vec<MultiResult<CipVal
             continue;
         }
 
-        if header_end >= buf.len() {
+        if header_end == buf.len() {
             results.push(MultiResult::Ok(CipValue::Unit));
             continue;
         }
@@ -102,8 +123,8 @@ pub fn decode_write_response(buf: &[u8]) -> Result<(), u8> {
 
     let general_status = buf[2];
     let ext_words = buf[3] as usize;
-
     let needed = 4 + ext_words * 2;
+
     if buf.len() < needed {
         return Err(0xFF);
     }
