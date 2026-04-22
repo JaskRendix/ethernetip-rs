@@ -1,4 +1,7 @@
 use std::io;
+use std::net::SocketAddr;
+use std::time::Instant;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::time::{timeout, Duration};
@@ -18,6 +21,10 @@ impl EthernetIpClient {
         let cip = build_symbol_browse_request();
         let res = self.send_rr_data(cip).await?;
 
+        if res.len() < 4 {
+            return Err(io::Error::other("Malformed CIP response for symbol browse"));
+        }
+
         let general_status = res[2];
         if general_status != 0 {
             return Err(io::Error::other(format!(
@@ -28,47 +35,56 @@ impl EthernetIpClient {
 
         let ext_words = res[3] as usize;
         let data_start = 4 + ext_words * 2;
+        if res.len() < data_start {
+            return Err(io::Error::other("Symbol browse response too short"));
+        }
 
         let symbols = parse_symbol_browse_response(&res[data_start..]);
         Ok(symbols)
     }
 
     pub async fn discover() -> io::Result<Vec<(String, String)>> {
+        const ENIP_PORT: u16 = 44818;
+        const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(1);
+        const RECV_TIMEOUT: Duration = Duration::from_millis(200);
+        const MIN_ENCAP_HEADER: usize = 24;
+        const ETHERNET_IP_HEADER_SKIP: usize = 30;
+        const IDENTITY_HEADER_LEN: usize = 32;
+
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
         socket.set_broadcast(true)?;
 
         let msg = EncapsulationHeader::new(COMMAND_LIST_IDENTITY, 0, 0).to_bytes();
-        socket.send_to(&msg, "255.255.255.255:44818").await?;
+        socket
+            .send_to(&msg, SocketAddr::from(([255, 255, 255, 255], ENIP_PORT)))
+            .await?;
 
         let mut results = Vec::new();
         let mut buf = [0u8; 1024];
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
-        while start.elapsed() < Duration::from_secs(1) {
-            if let Ok(Ok((len, addr))) =
-                timeout(Duration::from_millis(200), socket.recv_from(&mut buf)).await
-            {
+        while start.elapsed() < DISCOVERY_TIMEOUT {
+            if let Ok(Ok((len, addr))) = timeout(RECV_TIMEOUT, socket.recv_from(&mut buf)).await {
+                if len < ETHERNET_IP_HEADER_SKIP + MIN_ENCAP_HEADER {
+                    continue;
+                }
+
                 let data = &buf[..len];
+                let payload = &data[ETHERNET_IP_HEADER_SKIP..];
 
-                if data.len() < 30 {
+                if payload.len() < IDENTITY_HEADER_LEN + 1 {
                     continue;
                 }
 
-                let payload = &data[30..];
-
-                let name_offset = 2 + 16 + 2 + 2 + 2 + 2 + 2 + 4; // = 32
-                if payload.len() < name_offset + 1 {
-                    continue;
-                }
-
-                let name_len = payload[name_offset] as usize;
-                let name_start = name_offset + 1;
+                let name_len = payload[IDENTITY_HEADER_LEN] as usize;
+                let name_start = IDENTITY_HEADER_LEN + 1;
                 if payload.len() < name_start + name_len {
                     continue;
                 }
 
                 let name = String::from_utf8_lossy(&payload[name_start..name_start + name_len])
                     .into_owned();
+
                 results.push((addr.ip().to_string(), name));
             }
         }
@@ -89,8 +105,15 @@ impl EthernetIpClient {
 
         let mut h_buf = [0u8; 24];
         stream.read_exact(&mut h_buf).await?;
-        let hdr =
-            EncapsulationHeader::from_bytes(&h_buf).ok_or(io::Error::other("Handshake failed"))?;
+        let hdr = EncapsulationHeader::from_bytes(&h_buf)
+            .ok_or(io::Error::other("Handshake failed: invalid header"))?;
+
+        if hdr.status != 0 {
+            return Err(io::Error::other(format!(
+                "RegisterSession failed with status 0x{:04X}",
+                hdr.status
+            )));
+        }
 
         let mut s_buf = [0u8; 4];
         stream.read_exact(&mut s_buf).await?;
@@ -98,17 +121,23 @@ impl EthernetIpClient {
         Ok(Self {
             stream,
             session: hdr.session,
-            slot: None, // missing
+            slot: None,
         })
     }
 
     pub fn set_slot(&mut self, slot: u8) {
+        // ControlLogix chassis typically have a small slot range; we at least
+        // guard against obviously bogus values.
+        if slot > 17 {
+            // For now, we just clamp by ignoring.
+            return;
+        }
         self.slot = Some(slot);
     }
 
     pub fn parse_cpf(data: &[u8]) -> io::Result<&[u8]> {
         if data.len() < 10 {
-            return Err(io::Error::other("Data too short"));
+            return Err(io::Error::other("Data too short for CPF"));
         }
 
         let item_count = u16::from_le_bytes([data[6], data[7]]);
@@ -116,12 +145,16 @@ impl EthernetIpClient {
 
         for _ in 0..item_count {
             if data.len() < pos + 4 {
-                break;
+                return Err(io::Error::other("CPF item header truncated"));
             }
 
             let type_id = u16::from_le_bytes([data[pos], data[pos + 1]]);
             let len = u16::from_le_bytes([data[pos + 2], data[pos + 3]]) as usize;
             pos += 4;
+
+            if data.len() < pos + len {
+                return Err(io::Error::other("CPF item length out of bounds"));
+            }
 
             if type_id == 0x00B2 {
                 return Ok(&data[pos..pos + len]);
@@ -130,13 +163,17 @@ impl EthernetIpClient {
             pos += len;
         }
 
-        Err(io::Error::other("No CIP data item found"))
+        Err(io::Error::other("No CIP data item found in CPF"))
     }
 
     pub async fn read_tag(&mut self, tag: &str) -> io::Result<CipValue> {
         let cip = build_read_request(tag, self.slot);
 
         self.send_rr_data(cip).await.and_then(|res| {
+            if res.len() < 4 {
+                return Err(io::Error::other("Malformed CIP read response"));
+            }
+
             let general_status = res[2];
             if general_status != 0 {
                 return Err(io::Error::other(format!(
@@ -147,6 +184,9 @@ impl EthernetIpClient {
 
             let ext_words = res[3] as usize;
             let data_start = 4 + ext_words * 2;
+            if res.len() < data_start {
+                return Err(io::Error::other("CIP read response too short"));
+            }
 
             decode_cip_response(&res[data_start..]).ok_or(io::Error::other("Decode error"))
         })
@@ -163,15 +203,19 @@ impl EthernetIpClient {
     }
 
     async fn send_rr_data(&mut self, cip: Vec<u8>) -> io::Result<Vec<u8>> {
-        let mut rr = Vec::new();
-        rr.extend_from_slice(&0u32.to_le_bytes());
-        rr.extend_from_slice(&0u16.to_le_bytes());
-        rr.extend_from_slice(&2u16.to_le_bytes());
+        let mut rr = Vec::with_capacity(22 + cip.len());
+        rr.extend_from_slice(&0u32.to_le_bytes()); // interface handle
+        rr.extend_from_slice(&0u16.to_le_bytes()); // timeout
+        rr.extend_from_slice(&2u16.to_le_bytes()); // item count
+
+        // Null address item
         rr.extend_from_slice(&0x0000u16.to_le_bytes());
         rr.extend_from_slice(&0u16.to_le_bytes());
+
+        // Unconnected data item
         rr.extend_from_slice(&0x00B2u16.to_le_bytes());
         rr.extend_from_slice(&(cip.len() as u16).to_le_bytes());
-        rr.extend(cip);
+        rr.extend_from_slice(&cip);
 
         let pkt = EncapsulationHeader::new(COMMAND_SEND_RR_DATA, rr.len() as u16, self.session)
             .to_bytes()
@@ -185,6 +229,10 @@ impl EthernetIpClient {
             self.stream.read_exact(&mut h_buf).await?;
             let h = EncapsulationHeader::from_bytes(&h_buf)
                 .ok_or_else(|| io::Error::other("Bad encapsulation header"))?;
+
+            if h.length == 0 {
+                return Err(io::Error::other("Empty encapsulation payload"));
+            }
 
             let mut d = vec![0u8; h.length as usize];
             self.stream.read_exact(&mut d).await?;
