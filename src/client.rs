@@ -126,10 +126,7 @@ impl EthernetIpClient {
     }
 
     pub fn set_slot(&mut self, slot: u8) {
-        // ControlLogix chassis typically have a small slot range; we at least
-        // guard against obviously bogus values.
         if slot > 17 {
-            // For now, we just clamp by ignoring.
             return;
         }
         self.slot = Some(slot);
@@ -202,17 +199,44 @@ impl EthernetIpClient {
         })
     }
 
+    pub async fn read_tag_multi(&mut self, tag: &str, count: usize) -> io::Result<Vec<CipValue>> {
+        let mut out = Vec::with_capacity(count);
+        for i in 0..count {
+            let indexed = format!("{tag}[{i}]");
+            out.push(self.read_tag(&indexed).await?);
+        }
+        Ok(out)
+    }
+
+    pub async fn write_tag_multi(&mut self, tag: &str, values: &[CipValue]) -> io::Result<()> {
+        for (i, v) in values.iter().enumerate() {
+            let indexed = format!("{tag}[{i}]");
+            self.write_tag(&indexed, v.clone()).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn read_tags_msp(&mut self, tags: &[&str]) -> io::Result<Vec<MultiResult<CipValue>>> {
+        let mut reqs = Vec::with_capacity(tags.len());
+        for tag in tags {
+            let cip = build_read_request(tag, self.slot);
+            reqs.push(cip);
+        }
+
+        let msp = build_cip_multiple_service_request(&reqs);
+        let res = self.send_rr_data(msp).await?;
+        Ok(parse_cip_multiple_service_response(&res))
+    }
+
     async fn send_rr_data(&mut self, cip: Vec<u8>) -> io::Result<Vec<u8>> {
         let mut rr = Vec::with_capacity(22 + cip.len());
         rr.extend_from_slice(&0u32.to_le_bytes()); // interface handle
         rr.extend_from_slice(&0u16.to_le_bytes()); // timeout
         rr.extend_from_slice(&2u16.to_le_bytes()); // item count
 
-        // Null address item
         rr.extend_from_slice(&0x0000u16.to_le_bytes());
         rr.extend_from_slice(&0u16.to_le_bytes());
 
-        // Unconnected data item
         rr.extend_from_slice(&0x00B2u16.to_le_bytes());
         rr.extend_from_slice(&(cip.len() as u16).to_le_bytes());
         rr.extend_from_slice(&cip);
