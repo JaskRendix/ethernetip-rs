@@ -10,6 +10,15 @@ use crate::cip::*;
 use crate::encapsulation::*;
 use crate::types::*;
 
+pub fn build_read_request_count(tag: &str, count: usize, slot: Option<u8>) -> Vec<u8> {
+    let mut cip = build_read_request(tag, slot);
+    let count_le = (count as u16).to_le_bytes();
+    let pos = cip.len() - 2; // overwrite element count
+    cip[pos] = count_le[0];
+    cip[pos + 1] = count_le[1];
+    cip
+}
+
 pub struct EthernetIpClient {
     stream: TcpStream,
     session: u32,
@@ -17,32 +26,6 @@ pub struct EthernetIpClient {
 }
 
 impl EthernetIpClient {
-    pub async fn browse_symbols(&mut self) -> io::Result<Vec<SymbolInfo>> {
-        let cip = build_symbol_browse_request();
-        let res = self.send_rr_data(cip).await?;
-
-        if res.len() < 4 {
-            return Err(io::Error::other("Malformed CIP response for symbol browse"));
-        }
-
-        let general_status = res[2];
-        if general_status != 0 {
-            return Err(io::Error::other(format!(
-                "PLC returned error 0x{:02X} for symbol browse",
-                general_status
-            )));
-        }
-
-        let ext_words = res[3] as usize;
-        let data_start = 4 + ext_words * 2;
-        if res.len() < data_start {
-            return Err(io::Error::other("Symbol browse response too short"));
-        }
-
-        let symbols = parse_symbol_browse_response(&res[data_start..]);
-        Ok(symbols)
-    }
-
     pub async fn discover() -> io::Result<Vec<(String, String)>> {
         const ENIP_PORT: u16 = 44818;
         const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(1);
@@ -93,7 +76,7 @@ impl EthernetIpClient {
     }
 
     pub async fn connect(ip: &str) -> io::Result<Self> {
-        let mut stream = TcpStream::connect(format!("{}:44818", ip)).await?;
+        let mut stream = TcpStream::connect(format!("{ip}:44818")).await?;
 
         let mut reg = EncapsulationHeader::new(COMMAND_REGISTER_SESSION, 4, 0)
             .to_bytes()
@@ -163,6 +146,32 @@ impl EthernetIpClient {
         Err(io::Error::other("No CIP data item found in CPF"))
     }
 
+    pub async fn browse_symbols(&mut self) -> io::Result<Vec<SymbolInfo>> {
+        let cip = build_symbol_browse_request();
+        let res = self.send_rr_data(cip).await?;
+
+        if res.len() < 4 {
+            return Err(io::Error::other("Malformed CIP response for symbol browse"));
+        }
+
+        let general_status = res[2];
+        if general_status != 0 {
+            return Err(io::Error::other(format!(
+                "PLC returned error 0x{:02X} for symbol browse",
+                general_status
+            )));
+        }
+
+        let ext_words = res[3] as usize;
+        let data_start = 4 + ext_words * 2;
+        if res.len() < data_start {
+            return Err(io::Error::other("Symbol browse response too short"));
+        }
+
+        let symbols = parse_symbol_browse_response(&res[data_start..]);
+        Ok(symbols)
+    }
+
     pub async fn read_tag(&mut self, tag: &str) -> io::Result<CipValue> {
         let cip = build_read_request(tag, self.slot);
 
@@ -191,7 +200,6 @@ impl EthernetIpClient {
 
     pub async fn write_tag(&mut self, tag: &str, value: CipValue) -> io::Result<()> {
         let cip = build_write_request(tag, &value, self.slot);
-
         let res = self.send_rr_data(cip).await?;
 
         decode_write_response(&res).map_err(|status| {
@@ -200,11 +208,42 @@ impl EthernetIpClient {
     }
 
     pub async fn read_tag_multi(&mut self, tag: &str, count: usize) -> io::Result<Vec<CipValue>> {
-        let mut out = Vec::with_capacity(count);
-        for i in 0..count {
-            let indexed = format!("{tag}[{i}]");
-            out.push(self.read_tag(&indexed).await?);
+        let cip = build_read_request_count(tag, count, self.slot);
+        let res = self.send_rr_data(cip).await?;
+
+        if res.len() < 4 {
+            return Err(io::Error::other("Malformed CIP read response"));
         }
+
+        let general_status = res[2];
+        if general_status != 0 {
+            return Err(io::Error::other(format!(
+                "PLC returned error 0x{:02X}",
+                general_status
+            )));
+        }
+
+        let ext_words = res[3] as usize;
+        let data_start = 4 + ext_words * 2;
+
+        if res.len() < data_start + 2 {
+            return Err(io::Error::other("CIP multi read response too short"));
+        }
+
+        // For now we assume DINT array, matching fake_plc behavior.
+        let mut out = Vec::new();
+        let mut pos = data_start + 2; // skip CIP type + pad
+
+        for _ in 0..count {
+            if pos + 4 > res.len() {
+                return Err(io::Error::other("CIP multi read payload truncated"));
+            }
+
+            let v = i32::from_le_bytes([res[pos], res[pos + 1], res[pos + 2], res[pos + 3]]);
+            out.push(CipValue::DInt(v));
+            pos += 4;
+        }
+
         Ok(out)
     }
 
@@ -234,9 +273,11 @@ impl EthernetIpClient {
         rr.extend_from_slice(&0u16.to_le_bytes()); // timeout
         rr.extend_from_slice(&2u16.to_le_bytes()); // item count
 
+        // Null address item
         rr.extend_from_slice(&0x0000u16.to_le_bytes());
         rr.extend_from_slice(&0u16.to_le_bytes());
 
+        // Unconnected data item
         rr.extend_from_slice(&0x00B2u16.to_le_bytes());
         rr.extend_from_slice(&(cip.len() as u16).to_le_bytes());
         rr.extend_from_slice(&cip);

@@ -67,10 +67,10 @@ pub async fn run_fake_plc() -> tokio::io::Result<()> {
                         let cip_reply = handle_cip_request(cip, error_mode, &mut error_counter);
 
                         let mut cpf = Vec::new();
-                        cpf.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // interface, timeout
-                        cpf.extend_from_slice(&2u16.to_le_bytes()); // item count
-                        cpf.extend_from_slice(&[0, 0, 0, 0]); // null addr item
-                        cpf.extend_from_slice(&0x00B2u16.to_le_bytes()); // unconnected data
+                        cpf.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+                        cpf.extend_from_slice(&2u16.to_le_bytes());
+                        cpf.extend_from_slice(&[0, 0, 0, 0]);
+                        cpf.extend_from_slice(&0x00B2u16.to_le_bytes());
                         cpf.extend_from_slice(&(cip_reply.len() as u16).to_le_bytes());
                         cpf.extend_from_slice(&cip_reply);
 
@@ -106,7 +106,7 @@ fn handle_cip_request(cip: &[u8], error_mode: bool, error_counter: &mut u32) -> 
 
     match service {
         0x4C => handle_read(cip),
-        0x4D => handle_write(),
+        0x4D => handle_write(cip),
         0x03 if cip.len() >= 4 && cip[2] == 0x20 && cip[3] == 0x6B => handle_symbol_browse(),
         0x0A => handle_msp(cip, error_mode, error_counter),
         _ => vec![service | 0x80, 0x00, 0x01, 0x00],
@@ -130,8 +130,8 @@ fn handle_read(cip: &[u8]) -> Vec<u8> {
     let elem_count = elem_count.max(1);
 
     let mut out = Vec::new();
-    out.extend_from_slice(&[0xCC, 0x00, 0x00, 0x00]); // reply header
-    out.extend_from_slice(&[0xC4, 0x00]); // DINT
+    out.extend_from_slice(&[0xCC, 0x00, 0x00, 0x00]);
+    out.extend_from_slice(&[0xC4, 0x00]);
 
     for i in 0..elem_count {
         let v: i32 = 42 + i as i32;
@@ -141,7 +141,47 @@ fn handle_read(cip: &[u8]) -> Vec<u8> {
     out
 }
 
-fn handle_write() -> Vec<u8> {
+fn handle_write(cip: &[u8]) -> Vec<u8> {
+    if cip.len() < 6 {
+        return vec![0xCC, 0x00, 0x01, 0x00];
+    }
+
+    let path_words = cip[1] as usize;
+    let path_bytes = path_words * 2;
+    let mut pos = 2 + path_bytes;
+
+    if cip.len() < pos + 4 {
+        return vec![0xCC, 0x00, 0x01, 0x00];
+    }
+
+    let typ = u16::from_le_bytes([cip[pos], cip[pos + 1]]);
+    pos += 2;
+
+    let elem_count = u16::from_le_bytes([cip[pos], cip[pos + 1]]) as usize;
+    pos += 2;
+
+    match typ {
+        0xC4 => {
+            let needed = pos + elem_count * 4;
+            if cip.len() < needed {
+                return vec![0xCC, 0x00, 0x01, 0x00];
+            }
+        }
+        0xC3 => {
+            let needed = pos + elem_count * 2;
+            if cip.len() < needed {
+                return vec![0xCC, 0x00, 0x01, 0x00];
+            }
+        }
+        0xC1 => {
+            let needed = pos + elem_count;
+            if cip.len() < needed {
+                return vec![0xCC, 0x00, 0x01, 0x00];
+            }
+        }
+        _ => return vec![0xCC, 0x00, 0x01, 0x00],
+    }
+
     vec![0xCC, 0x00, 0x00, 0x00]
 }
 
