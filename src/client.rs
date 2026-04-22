@@ -47,11 +47,28 @@ impl EthernetIpClient {
             if let Ok(Ok((len, addr))) =
                 timeout(Duration::from_millis(200), socket.recv_from(&mut buf)).await
             {
-                if len > 44 {
-                    let name_len = buf[44] as usize;
-                    let name = String::from_utf8_lossy(&buf[45..45 + name_len]).into_owned();
-                    results.push((addr.ip().to_string(), name));
+                let data = &buf[..len];
+
+                if data.len() < 30 {
+                    continue;
                 }
+
+                let payload = &data[30..];
+
+                let name_offset = 2 + 16 + 2 + 2 + 2 + 2 + 2 + 4; // = 32
+                if payload.len() < name_offset + 1 {
+                    continue;
+                }
+
+                let name_len = payload[name_offset] as usize;
+                let name_start = name_offset + 1;
+                if payload.len() < name_start + name_len {
+                    continue;
+                }
+
+                let name = String::from_utf8_lossy(&payload[name_start..name_start + name_len])
+                    .into_owned();
+                results.push((addr.ip().to_string(), name));
             }
         }
 
@@ -141,9 +158,11 @@ impl EthernetIpClient {
 
     async fn send_rr_data(&mut self, cip: Vec<u8>) -> io::Result<Vec<u8>> {
         let mut rr = Vec::new();
-        rr.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+        rr.extend_from_slice(&0u32.to_le_bytes());
+        rr.extend_from_slice(&0u16.to_le_bytes());
         rr.extend_from_slice(&2u16.to_le_bytes());
-        rr.extend_from_slice(&[0, 0, 0, 0]);
+        rr.extend_from_slice(&0x0000u16.to_le_bytes());
+        rr.extend_from_slice(&0u16.to_le_bytes());
         rr.extend_from_slice(&0x00B2u16.to_le_bytes());
         rr.extend_from_slice(&(cip.len() as u16).to_le_bytes());
         rr.extend(cip);
@@ -158,13 +177,13 @@ impl EthernetIpClient {
 
             let mut h_buf = [0u8; 24];
             self.stream.read_exact(&mut h_buf).await?;
-            let h = EncapsulationHeader::from_bytes(&h_buf).unwrap();
+            let h = EncapsulationHeader::from_bytes(&h_buf)
+                .ok_or_else(|| io::Error::other("Bad encapsulation header"))?;
 
             let mut d = vec![0u8; h.length as usize];
             self.stream.read_exact(&mut d).await?;
 
-            let res = Self::parse_cpf(&d)?;
-            Ok(res.to_vec())
+            Ok(Self::parse_cpf(&d)?.to_vec())
         })
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "PLC Timeout"))?
