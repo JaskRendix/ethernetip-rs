@@ -1,40 +1,45 @@
-# ethernetip-rs
+# ethernetip‑rs
 
-This project is a Rust re‑implementation of the original EthernetIP4J library. It provides a simple interface for reading and writing tags on ControlLogix and CompactLogix PLCs using CIP over EtherNet/IP.
+A Rust implementation of the EtherNet/IP™ protocol for reading and writing CIP tags on Allen‑Bradley ControlLogix and CompactLogix PLCs.  
+The library provides a simple async API for symbolic tag access, array operations, and multi‑tag requests, with correct EPATH encoding and slot routing.
 
-## Origin
-
-This project is a Rust re‑implementation of the original EthernetIp4j library:
-
-https://code.google.com/archive/p/ethernetip4j/
-
-The original EthernetIp4j project is a communication protocol library for Rockwell Allen‑Bradley PLC systems, written in Java and released under the Apache License 2.0. This Rust version is an independent port that preserves the same licensing terms.
-
-## Original project
-
-The original EthernetIp4j project was written in Java and is available here:
-
-https://github.com/tuliomagalhaes/Ethernetip4j
-
-EthernetIp4j is a communication protocol library for Rockwell Allen‑Bradley PLC systems, implemented entirely in Java. This Rust version is a separate re‑implementation inspired by the original design.
+---
 
 ## Overview
 
-The client communicates with a single Ethernet module in a ControlLogix rack or with a CompactLogix CPU.  
-For ControlLogix systems, the slot number of the CPU matters. The Ethernet module forwards requests to the CPU slot you specify.
+`ethernetip-rs` implements the unconnected CIP messaging path used by Rockwell Logix controllers.  
+It supports both CompactLogix (no slot routing) and ControlLogix (CPU located in a chassis slot).
 
-- If the Ethernet module is in slot 1 and the CPU is in slot 0, you can read and write tags without specifying a slot.
-- If the CPU is in another slot, set the slot before issuing reads or writes.
-- If the Ethernet module itself is not in slot 1, use the API that accepts both Ethernet‑slot and CPU‑slot.
+### Supported features
 
-The library supports:
+- Read a single tag  
+- Write a single tag  
+- Write arrays and array fragments  
+- Multiple Service Packet (MSP) read/write  
+- Correct CIP EPATH encoding (symbolic segments, array indices, slot routing)  
+- Optional fake PLC for local testing  
+- Async API using `tokio`
 
-- Reading a single tag
-- Writing a single tag
-- Writing arrays
-- Writing array fragments
-- Multiple Service Packet (MSP) read and write
-- A built‑in fake PLC for local testing
+### Slot routing
+
+ControlLogix systems require routing through the chassis:
+
+- CompactLogix: CPU is the Ethernet endpoint → **no slot routing**
+- ControlLogix: CPU resides in a slot → **slot must be encoded in the EPATH**
+- If the Ethernet module is not in slot 1, the API allows specifying both Ethernet‑slot and CPU‑slot
+
+Slot routing is now applied consistently across all read/write operations.
+
+---
+
+## Installation
+
+```toml
+[dependencies]
+ethernetip = "0.x"
+```
+
+---
 
 ## Basic usage
 
@@ -46,7 +51,7 @@ use ethernetip::EthernetIpClient;
 async fn main() -> Result<()> {
     let mut client = EthernetIpClient::connect("192.168.1.10", 44818).await?;
 
-    // Optional: set CPU slot for ControlLogix racks
+    // For ControlLogix racks: route to CPU slot
     client.set_slot(0);
 
     let value = client.read_tag("MyTag").await?;
@@ -56,12 +61,16 @@ async fn main() -> Result<()> {
 }
 ```
 
+---
+
 ## Reading with explicit CPU slot
 
 ```rust
-client.set_slot(2);
+client.set_slot(2); // CPU in slot 2
 let v = client.read_tag("SomeTag").await?;
 ```
+
+---
 
 ## Writing a tag
 
@@ -70,6 +79,8 @@ use ethernetip::types::CipValue;
 
 client.write_tag("MyTag", CipValue::DInt(42)).await?;
 ```
+
+---
 
 ## Writing an array
 
@@ -80,21 +91,30 @@ let data = CipValue::DIntArray(vec![1, 2, 3, 4]);
 client.write_array_tag("MyArray", data).await?;
 ```
 
+---
+
 ## Multiple tag read
 
 ```rust
 let results = client.read_tags_multi(&["A", "B", "C"]).await?;
 ```
 
+---
+
 ## Fake PLC for testing
 
-A simple fake PLC is included. It listens on port 44818 and returns a fixed BOOL value for testing.
+A minimal fake PLC is included for local development.  
+It implements a subset of CIP services and returns deterministic values.
 
 ```rust
 tokio::spawn(async {
     ethernetip::fake_plc::run_fake_plc().await.unwrap();
 });
 ```
+
+> Note: the fake PLC uses a simplified EPATH parser and does **not** fully emulate ControlLogix routing behavior.
+
+---
 
 ## Running
 
@@ -104,22 +124,22 @@ source $HOME/.cargo/env
 cargo run
 ```
 
-## Potential ideas
+---
 
-These are possible future improvements. They are not commitments and may or may not be implemented.
+## Future improvements (non‑committal)
 
-- Add Forward Open and Forward Close to support connected messaging.
-- Add class/instance/attribute access for devices that do not use symbolic tags.
-- Expand the fake PLC to simulate more CIP types, error codes, and multi-tag responses.
-- Improve error handling for timeouts, retries, and network interruptions.
-- Add benchmarks for read, write, and MSP performance.
-- Add support for implicit I/O messaging (UDP) for devices that require it.
-- Add documentation for all CIP services currently implemented.
-- Add examples for MSP write and fragmented array writes.
-- Find access to a real ControlLogix or CompactLogix system to validate behavior against actual hardware.
+- Forward Open / Forward Close (connected messaging)
+- Class/instance/attribute access for non‑Logix devices
+- Expanded fake PLC with more CIP types and error codes
+- Better timeout/retry handling
+- Benchmarks for read/write/MSP performance
+- Optional implicit I/O (UDP) support
+- More examples and protocol documentation
+- Validation against real ControlLogix/CompactLogix hardware
+
+---
 
 ## Notes
 
-This Rust port was written for a job interview. The interview was not successful = no job.
-
-Real hardware testing would help confirm correctness beyond the current fake PLC and unit tests. Access to a ControlLogix or CompactLogix system would be ideal. PLC‑controlled CNC equipment used in industrial sectors such as stone and marble processing could also serve as a suitable test environment, provided the machines use Allen‑Bradley controllers with EtherNet/IP support.
+This Rust port was originally written for a job interview.  
+Real hardware testing would further validate correctness beyond the fake PLC and unit tests.
