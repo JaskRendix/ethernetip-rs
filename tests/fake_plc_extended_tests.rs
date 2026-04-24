@@ -1,23 +1,13 @@
-use ethernetip::fake_plc::run_fake_plc;
+mod common;
+use common::start_fake_plc_global;
 use ethernetip::types::{CipValue, MultiResult};
 use ethernetip::EthernetIpClient;
-use std::sync::Once;
 use std::time::Duration;
 use tokio::time::sleep;
 
-static START_EXTENDED: Once = Once::new();
-
-fn start_fake_plc_once() {
-    START_EXTENDED.call_once(|| {
-        tokio::spawn(async {
-            let _ = run_fake_plc().await;
-        });
-    });
-}
-
 #[tokio::test]
 async fn read_multi_elements_from_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
@@ -35,7 +25,7 @@ async fn read_multi_elements_from_fake_plc() {
 
 #[tokio::test]
 async fn msp_multi_read_from_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
@@ -59,7 +49,7 @@ async fn msp_multi_read_from_fake_plc() {
 async fn msp_error_simulation_every_5th_request() {
     std::env::set_var("FAKE_PLC_ERROR", "1");
 
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")

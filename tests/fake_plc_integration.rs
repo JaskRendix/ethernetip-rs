@@ -1,27 +1,15 @@
 use ethernetip::cip::*;
-use ethernetip::fake_plc::run_fake_plc;
 use ethernetip::types::{CipType, CipValue};
 use ethernetip::EthernetIpClient;
-use std::sync::Once;
 use std::time::Duration;
 use tokio::time::sleep;
 
-static START: Once = Once::new();
-
-fn start_fake_plc_once() {
-    START.call_once(|| {
-        std::thread::spawn(|| {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(run_fake_plc())
-                .unwrap();
-        });
-    });
-}
+mod common;
+use common::start_fake_plc_global;
 
 #[tokio::test]
 async fn read_from_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
@@ -34,7 +22,7 @@ async fn read_from_fake_plc() {
 
 #[tokio::test]
 async fn write_to_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
@@ -179,7 +167,7 @@ fn map_status_codes() {
 
 #[tokio::test]
 async fn browse_symbols_from_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
@@ -197,7 +185,7 @@ async fn browse_symbols_from_fake_plc() {
 
 #[tokio::test]
 async fn read_string_from_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
@@ -210,7 +198,7 @@ async fn read_string_from_fake_plc() {
 
 #[tokio::test]
 async fn read_lint_from_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
@@ -223,7 +211,7 @@ async fn read_lint_from_fake_plc() {
 
 #[tokio::test]
 async fn read_bool_packed_from_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
@@ -249,7 +237,7 @@ async fn read_bool_packed_from_fake_plc() {
 
 #[tokio::test]
 async fn read_multi_lint_from_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
@@ -265,7 +253,7 @@ async fn read_multi_lint_from_fake_plc() {
 
 #[tokio::test]
 async fn read_fragmented_string_from_fake_plc() {
-    start_fake_plc_once();
+    start_fake_plc_global();
     sleep(Duration::from_millis(200)).await;
 
     let mut client = EthernetIpClient::connect("127.0.0.1")
