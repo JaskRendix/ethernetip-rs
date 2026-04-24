@@ -6,13 +6,15 @@ use std::sync::Once;
 use std::time::Duration;
 use tokio::time::sleep;
 
-// Start the fake PLC only once for the entire test suite
 static START: Once = Once::new();
 
 fn start_fake_plc_once() {
     START.call_once(|| {
-        tokio::spawn(async {
-            let _ = run_fake_plc().await;
+        std::thread::spawn(|| {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(run_fake_plc())
+                .unwrap();
         });
     });
 }
@@ -191,4 +193,85 @@ async fn browse_symbols_from_fake_plc() {
     assert_eq!(s.name, "TestTag");
     assert_eq!(s.typ, CipType::DInt);
     assert!(s.array_dims.is_none());
+}
+
+#[tokio::test]
+async fn read_string_from_fake_plc() {
+    start_fake_plc_once();
+    sleep(Duration::from_millis(200)).await;
+
+    let mut client = EthernetIpClient::connect("127.0.0.1")
+        .await
+        .expect("connect failed");
+
+    let v = client.read_tag("StringTag").await.unwrap();
+    assert_eq!(v, CipValue::String("Hello".into()));
+}
+
+#[tokio::test]
+async fn read_lint_from_fake_plc() {
+    start_fake_plc_once();
+    sleep(Duration::from_millis(200)).await;
+
+    let mut client = EthernetIpClient::connect("127.0.0.1")
+        .await
+        .expect("connect failed");
+
+    let v = client.read_tag("LINTTag").await.unwrap();
+    assert_eq!(v, CipValue::LInt(42000000000));
+}
+
+#[tokio::test]
+async fn read_bool_packed_from_fake_plc() {
+    start_fake_plc_once();
+    sleep(Duration::from_millis(200)).await;
+
+    let mut client = EthernetIpClient::connect("127.0.0.1")
+        .await
+        .expect("connect failed");
+
+    let vals = client.read_array("PackedBoolTag", 8).await.unwrap();
+
+    assert_eq!(
+        vals,
+        vec![
+            CipValue::Bool(true),
+            CipValue::Bool(false),
+            CipValue::Bool(true),
+            CipValue::Bool(false),
+            CipValue::Bool(true),
+            CipValue::Bool(false),
+            CipValue::Bool(true),
+            CipValue::Bool(false),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn read_multi_lint_from_fake_plc() {
+    start_fake_plc_once();
+    sleep(Duration::from_millis(200)).await;
+
+    let mut client = EthernetIpClient::connect("127.0.0.1")
+        .await
+        .expect("connect failed");
+
+    let vals = client.read_tag_multi("LINTTag", 2).await.unwrap();
+
+    assert_eq!(vals.len(), 2);
+    assert_eq!(vals[0], CipValue::LInt(42000000000));
+    assert_eq!(vals[1], CipValue::LInt(42000000001));
+}
+
+#[tokio::test]
+async fn read_fragmented_string_from_fake_plc() {
+    start_fake_plc_once();
+    sleep(Duration::from_millis(200)).await;
+
+    let mut client = EthernetIpClient::connect("127.0.0.1")
+        .await
+        .expect("connect failed");
+
+    let vals = client.read_array("StringTag", 1).await.unwrap();
+    assert_eq!(vals, vec![CipValue::String("Hello".into())]);
 }

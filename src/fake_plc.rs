@@ -67,9 +67,13 @@ pub async fn run_fake_plc() -> tokio::io::Result<()> {
                         let cip_reply = handle_cip_request(cip, error_mode, &mut error_counter);
 
                         let mut cpf = Vec::new();
+                        // interface handle + timeout
                         cpf.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+                        // item count = 2
                         cpf.extend_from_slice(&2u16.to_le_bytes());
+                        // null address item
                         cpf.extend_from_slice(&[0, 0, 0, 0]);
+                        // data item (0x00B2)
                         cpf.extend_from_slice(&0x00B2u16.to_le_bytes());
                         cpf.extend_from_slice(&(cip_reply.len() as u16).to_le_bytes());
                         cpf.extend_from_slice(&cip_reply);
@@ -100,11 +104,13 @@ fn handle_cip_request(cip: &[u8], error_mode: bool, error_counter: &mut u32) -> 
     if error_mode {
         *error_counter += 1;
         if (*error_counter).is_multiple_of(5) {
+            // generic error every 5th request
             return vec![service | 0x80, 0x00, 0x01, 0x00];
         }
     }
 
     match service {
+        0x52 => handle_read_fragmented(cip),
         0x4C => handle_read(cip),
         0x4D => handle_write(cip),
         0x03 if cip.len() >= 4 && cip[2] == 0x20 && cip[3] == 0x6B => handle_symbol_browse(),
@@ -129,21 +135,166 @@ fn handle_read(cip: &[u8]) -> Vec<u8> {
     let elem_count = u16::from_le_bytes([cip[elem_off], cip[elem_off + 1]]) as usize;
     let elem_count = elem_count.max(1);
 
-    let mut out = Vec::new();
-    out.extend_from_slice(&[0xCC, 0x00, 0x00, 0x00]);
-    out.extend_from_slice(&[0xC4, 0x00]);
+    let tag = extract_tag_name(cip);
 
-    for i in 0..elem_count {
+    match tag.as_str() {
+        "DINTTag" | "Test" | "Tag" => fake_read_dint(elem_count),
+        "LINTTag" => fake_read_lint(elem_count),
+        "REALTag" => fake_read_real(elem_count),
+        "BOOLTag" => fake_read_bool(elem_count),
+        "PackedBoolTag" => fake_read_bool_packed(elem_count),
+        "StringTag" => fake_read_string(),
+        _ => fake_read_dint(elem_count),
+    }
+}
+
+fn handle_read_fragmented(cip: &[u8]) -> Vec<u8> {
+    let path_words = cip[1] as usize;
+    let path_bytes = path_words * 2;
+    let elem_off = 2 + path_bytes;
+
+    if cip.len() < elem_off + 6 {
+        return vec![0xD2, 0x00, 0x01, 0x00];
+    }
+
+    let count = u16::from_le_bytes([cip[elem_off], cip[elem_off + 1]]) as usize;
+    let offset = u32::from_le_bytes([
+        cip[elem_off + 2],
+        cip[elem_off + 3],
+        cip[elem_off + 4],
+        cip[elem_off + 5],
+    ]) as usize;
+
+    let tag = extract_tag_name(cip);
+
+    let (type_id, full) = match tag.as_str() {
+        "StringTag" => {
+            let s = b"Hello";
+            let mut v = Vec::new();
+            v.extend_from_slice(&(s.len() as u16).to_le_bytes());
+            v.extend_from_slice(s);
+            v.extend(std::iter::repeat_n(0, 82 - s.len()));
+            (0x00D0u16, v)
+        }
+        "LINTTag" => {
+            let mut v = Vec::new();
+            for i in 0..count {
+                let val: i64 = 42000000000 + i as i64;
+                v.extend_from_slice(&val.to_le_bytes());
+            }
+            (0x00C5u16, v)
+        }
+        "PackedBoolTag" => (0x00D3u16, vec![0b01010101]),
+        _ => {
+            let mut v = Vec::new();
+            for i in 0..count {
+                let val: i32 = 42 + i as i32;
+                v.extend_from_slice(&val.to_le_bytes());
+            }
+            (0x00C4u16, v)
+        }
+    };
+
+    if offset >= full.len() && offset != 0 {
+        return vec![0xD2, 0x00, 0x01, 0x00];
+    }
+
+    let remaining = &full[offset..];
+    // determine if there is more data after this chunk (status 0x06) or we're done (0x00)
+    let status: u8 = 0x00; // fake PLC always returns everything in one shot
+
+    let mut out = vec![0x52 | 0x80, 0x00, status, 0x00];
+
+    if offset == 0 {
+        out.extend_from_slice(&type_id.to_le_bytes());
+    }
+
+    out.extend_from_slice(remaining);
+    out
+}
+
+fn extract_tag_name(cip: &[u8]) -> String {
+    if cip.len() < 4 {
+        return "DINTTag".into();
+    }
+
+    let path_words = cip[1] as usize;
+    let path_bytes = path_words * 2;
+
+    if cip.len() < 2 + path_bytes {
+        return "DINTTag".into();
+    }
+
+    let path = &cip[2..2 + path_bytes];
+
+    if path.len() < 2 || path[0] != 0x91 {
+        return "DINTTag".into();
+    }
+
+    let len = path[1] as usize;
+    if path.len() < 2 + len {
+        return "DINTTag".into();
+    }
+
+    let name_bytes = &path[2..2 + len];
+    String::from_utf8_lossy(name_bytes).into_owned()
+}
+
+fn fake_read_dint(count: usize) -> Vec<u8> {
+    let mut out = vec![0x4C | 0x80, 0x00, 0x00, 0x00, 0xC4, 0x00];
+    for i in 0..count {
         let v: i32 = 42 + i as i32;
         out.extend_from_slice(&v.to_le_bytes());
     }
+    out
+}
 
+fn fake_read_lint(count: usize) -> Vec<u8> {
+    let mut out = vec![0x4C | 0x80, 0x00, 0x00, 0x00, 0xC5, 0x00];
+    for i in 0..count {
+        let v: i64 = 42000000000 + i as i64;
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+fn fake_read_real(count: usize) -> Vec<u8> {
+    let mut out = vec![0x4C | 0x80, 0x00, 0x00, 0x00, 0xCA, 0x00];
+    for i in 0..count {
+        let v: f32 = 1.5 + i as f32;
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+fn fake_read_bool(count: usize) -> Vec<u8> {
+    let mut out = vec![0x4C | 0x80, 0x00, 0x00, 0x00, 0xC1, 0x00];
+    for i in 0..count {
+        out.push(if i % 2 == 0 { 1 } else { 0 });
+    }
+    out
+}
+
+fn fake_read_bool_packed(_count: usize) -> Vec<u8> {
+    let mut out = vec![0x4C | 0x80, 0x00, 0x00, 0x00, 0xD3, 0x00];
+    out.push(0b01010101);
+    out
+}
+
+fn fake_read_string() -> Vec<u8> {
+    let s = b"Hello";
+    let len = s.len() as u16;
+
+    let mut out = vec![0x4C | 0x80, 0x00, 0x00, 0x00, 0xD0, 0x00];
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(s);
+    out.extend(std::iter::repeat_n(0, 82 - s.len()));
     out
 }
 
 fn handle_write(cip: &[u8]) -> Vec<u8> {
     if cip.len() < 6 {
-        return vec![0xCC, 0x00, 0x01, 0x00];
+        return vec![0xCD, 0x00, 0x01, 0x00];
     }
 
     let path_words = cip[1] as usize;
@@ -151,7 +302,7 @@ fn handle_write(cip: &[u8]) -> Vec<u8> {
     let mut pos = 2 + path_bytes;
 
     if cip.len() < pos + 4 {
-        return vec![0xCC, 0x00, 0x01, 0x00];
+        return vec![0xCD, 0x00, 0x01, 0x00];
     }
 
     let typ = u16::from_le_bytes([cip[pos], cip[pos + 1]]);
@@ -160,29 +311,23 @@ fn handle_write(cip: &[u8]) -> Vec<u8> {
     let elem_count = u16::from_le_bytes([cip[pos], cip[pos + 1]]) as usize;
     pos += 2;
 
-    match typ {
-        0xC4 => {
-            let needed = pos + elem_count * 4;
-            if cip.len() < needed {
-                return vec![0xCC, 0x00, 0x01, 0x00];
-            }
-        }
-        0xC3 => {
-            let needed = pos + elem_count * 2;
-            if cip.len() < needed {
-                return vec![0xCC, 0x00, 0x01, 0x00];
-            }
-        }
-        0xC1 => {
-            let needed = pos + elem_count;
-            if cip.len() < needed {
-                return vec![0xCC, 0x00, 0x01, 0x00];
-            }
-        }
-        _ => return vec![0xCC, 0x00, 0x01, 0x00],
+    let ok = match typ {
+        0x00C1 => cip.len() >= pos + elem_count,
+        0x00C2 => cip.len() >= pos + elem_count,
+        0x00C3 => cip.len() >= pos + elem_count * 2,
+        0x00C4 => cip.len() >= pos + elem_count * 4,
+        0x00C5 => cip.len() >= pos + elem_count * 8,
+        0x00CA => cip.len() >= pos + elem_count * 4,
+        0x00D0 => cip.len() >= pos + 2,
+        0x00D3 => cip.len() > pos,
+        _ => false,
+    };
+
+    if !ok {
+        return vec![0xCD, 0x00, 0x01, 0x00];
     }
 
-    vec![0xCC, 0x00, 0x00, 0x00]
+    vec![0xCD, 0x00, 0x00, 0x00]
 }
 
 fn handle_symbol_browse() -> Vec<u8> {
@@ -191,8 +336,10 @@ fn handle_symbol_browse() -> Vec<u8> {
 
     let mut block = Vec::new();
 
+    // service 0x83, success
     block.extend_from_slice(&[0x83, 0x00, 0x00, 0x00]);
 
+    // symbol handle
     block.extend_from_slice(&0u16.to_le_bytes());
     block.push(name_len);
     block.extend_from_slice(name);
@@ -200,9 +347,11 @@ fn handle_symbol_browse() -> Vec<u8> {
         block.push(0);
     }
 
+    // symbol type = DINT
     block.extend_from_slice(&0u16.to_le_bytes());
     block.extend_from_slice(&0xC4u16.to_le_bytes());
 
+    // array dims = none
     block.extend_from_slice(&0u16.to_le_bytes());
     block.push(0);
     block.extend_from_slice(&0u16.to_le_bytes());

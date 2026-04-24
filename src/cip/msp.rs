@@ -116,22 +116,18 @@ pub fn decode_write_response(buf: &[u8]) -> Result<(), u8> {
     if buf.len() < 4 {
         return Err(0xFF);
     }
-
-    if buf[0] != 0xCC || buf[1] != 0x00 {
+    if buf[0] != 0xCD || buf[1] != 0x00 {
+        // 0xCD = 0x4D | 0x80 (write reply)
         return Err(0xFF);
     }
-
     let general_status = buf[2];
     let ext_words = buf[3] as usize;
     let needed = 4 + ext_words * 2;
-
     if buf.len() < needed {
         return Err(0xFF);
     }
-
     if general_status != 0 {
         return Err(general_status);
     }
-
     Ok(())
 }
