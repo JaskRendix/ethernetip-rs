@@ -89,6 +89,45 @@ pub async fn run_fake_plc() -> tokio::io::Result<()> {
                         let _ = socket.write_all(&cpf).await;
                     }
 
+                    COMMAND_SEND_UNIT_DATA => {
+                        // treat UnitData exactly like RRData for fake PLC
+                        if payload_len < 6 {
+                            continue;
+                        }
+
+                        // first 4 bytes = connection ID
+                        // next 2 bytes = sequence counter
+                        // remaining = CIP
+                        if payload_len < 6 {
+                            continue;
+                        }
+
+                        let cip = &payload[6..];
+                        if cip.is_empty() {
+                            continue;
+                        }
+
+                        let cip_reply = handle_cip_request(cip, error_mode, &mut error_counter);
+
+                        let mut cpf = Vec::new();
+                        cpf.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // interface handle + timeout
+                        cpf.extend_from_slice(&2u16.to_le_bytes());
+                        cpf.extend_from_slice(&[0, 0, 0, 0]); // null address
+                        cpf.extend_from_slice(&0x00B2u16.to_le_bytes());
+                        cpf.extend_from_slice(&(cip_reply.len() as u16).to_le_bytes());
+                        cpf.extend_from_slice(&cip_reply);
+
+                        let hdr = EncapsulationHeader::new(
+                            COMMAND_SEND_UNIT_DATA,
+                            cpf.len() as u16,
+                            session_id,
+                        )
+                        .to_bytes();
+
+                        let _ = socket.write_all(&hdr).await;
+                        let _ = socket.write_all(&cpf).await;
+                    }
+
                     COMMAND_UNREGISTER_SESSION => break,
 
                     _ => {}
@@ -111,12 +150,41 @@ fn handle_cip_request(cip: &[u8], error_mode: bool, error_counter: &mut u32) -> 
 
     match service {
         0x52 => handle_read_fragmented(cip),
+        0x54 => handle_forward_open(),
         0x4C => handle_read(cip),
         0x4D => handle_write(cip),
+        0x4E => handle_forward_close(),
         0x03 if cip.len() >= 4 && cip[2] == 0x20 && cip[3] == 0x6B => handle_symbol_browse(),
         0x0A => handle_msp(cip, error_mode, error_counter),
         _ => vec![service | 0x80, 0x00, 0x01, 0x00],
     }
+}
+
+fn handle_forward_close() -> Vec<u8> {
+    vec![
+        0x4E | 0x80, // service | 0x80
+        0x00,
+        0x00, // success
+        0x00,
+    ]
+}
+
+fn handle_forward_open() -> Vec<u8> {
+    // success reply with fake connection ID 0x11223344
+    let mut out = vec![
+        0x54 | 0x80, // service | 0x80
+        0x00,        // reserved
+        0x00,        // general status = success
+        0x00,        // ext status size
+    ];
+
+    // fake O->T connection ID
+    out.extend_from_slice(&0x11223344u32.to_le_bytes());
+
+    // fake T->O connection ID
+    out.extend_from_slice(&0x55667788u32.to_le_bytes());
+
+    out
 }
 
 fn handle_read(cip: &[u8]) -> Vec<u8> {

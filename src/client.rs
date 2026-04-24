@@ -125,6 +125,18 @@ impl EthernetIpClient {
         self.slot = Some(slot);
     }
 
+    pub fn is_connected(&self) -> bool {
+        self.connected
+    }
+
+    pub fn sequence(&self) -> u16 {
+        self.sequence
+    }
+
+    pub async fn try_send_unit_data(&mut self, cip: Vec<u8>) -> io::Result<Vec<u8>> {
+        self.send_unit_data(cip).await
+    }
+
     pub fn parse_cpf(data: &[u8]) -> io::Result<&[u8]> {
         if data.len() < 10 {
             return Err(io::Error::other("Data too short for CPF"));
