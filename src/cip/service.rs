@@ -4,4 +4,6 @@ pub enum CipService {
     WriteData = 0x4D,
     ReadFragmented = 0x52,
     MultipleService = 0x0A,
+    ForwardOpen = 0x54,
+    ForwardClose = 0x4E,
 }

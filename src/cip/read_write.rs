@@ -104,3 +104,140 @@ pub fn build_read_fragmented_request(
 
     cip
 }
+
+fn encode_connection_manager_path(slot: Option<u8>) -> Vec<u8> {
+    let mut segments = Vec::new();
+
+    if let Some(slot) = slot {
+        // Port segment: port 1 (backplane), link = slot
+        segments.push(0x01); // port
+        segments.push(slot); // link address
+        segments.push(0x00); // pad
+        segments.push(0x00); // pad
+    }
+
+    // Class 0x06
+    segments.push(0x20);
+    segments.push(0x06);
+
+    // Instance 0x01
+    segments.push(0x24);
+    segments.push(0x01);
+
+    let word_count = (segments.len() / 2) as u8;
+
+    let mut out = Vec::with_capacity(1 + segments.len());
+    out.push(word_count);
+    out.extend_from_slice(&segments);
+    out
+}
+
+pub fn build_forward_open_request(slot: Option<u8>) -> Vec<u8> {
+    let path = encode_connection_manager_path(slot);
+
+    let mut cip = Vec::new();
+    cip.push(CipService::ForwardOpen as u8);
+    cip.extend_from_slice(&path);
+
+    // Priority/Timeout: priority = 0, timeout ticks = 10
+    cip.push(0x0A);
+    cip.push(0x0A);
+
+    // O->T connection ID (assigned by target for explicit messaging, so 0)
+    cip.extend_from_slice(&0u32.to_le_bytes());
+
+    // T->O connection ID (not used for explicit messaging)
+    cip.extend_from_slice(&0u32.to_le_bytes());
+
+    // Connection serial number
+    cip.extend_from_slice(&1u16.to_le_bytes());
+
+    // Originator vendor ID (0 = non‑registered / generic)
+    cip.extend_from_slice(&0u16.to_le_bytes());
+
+    // Originator serial number (arbitrary but stable)
+    cip.extend_from_slice(&0x1234_5678u32.to_le_bytes());
+
+    // Timeout multiplier
+    cip.push(3);
+
+    // Reserved (3 bytes)
+    cip.extend_from_slice(&[0x00, 0x00, 0x00]);
+
+    // O->T RPI (100 ms, in microseconds)
+    cip.extend_from_slice(&100_000u32.to_le_bytes());
+
+    // O->T connection parameters:
+    //  - point‑to‑point, variable length, 500 bytes max
+    let o_to_t_params: u16 = 0x4000 | 500;
+    cip.extend_from_slice(&o_to_t_params.to_le_bytes());
+
+    // T->O RPI (not used)
+    cip.extend_from_slice(&0u32.to_le_bytes());
+
+    // T->O connection parameters (not used)
+    cip.extend_from_slice(&0u16.to_le_bytes());
+
+    // Transport class trigger: Class 3, client‑initiated, application trigger
+    cip.push(0xA3);
+
+    // Connection path size (in words) and path:
+    // For explicit messaging to the CPU: port 1 backplane, slot, class 0x02 (Message Router), instance 0x01
+    let mut conn_path_segments = Vec::new();
+    if let Some(slot) = slot {
+        conn_path_segments.push(0x01); // port 1
+        conn_path_segments.push(slot); // link = slot
+        conn_path_segments.push(0x00);
+        conn_path_segments.push(0x00);
+    }
+    conn_path_segments.push(0x20); // class
+    conn_path_segments.push(0x02); // Message Router
+    conn_path_segments.push(0x24); // instance
+    conn_path_segments.push(0x01); // instance 1
+
+    let conn_path_words = (conn_path_segments.len() / 2) as u8;
+    cip.push(conn_path_words);
+    cip.extend_from_slice(&conn_path_segments);
+
+    cip
+}
+
+pub fn build_forward_close_request(slot: Option<u8>) -> Vec<u8> {
+    let path = encode_connection_manager_path(slot);
+
+    let mut cip = Vec::new();
+    cip.push(CipService::ForwardClose as u8);
+    cip.extend_from_slice(&path);
+
+    // Priority/Timeout
+    cip.push(0x0A);
+    cip.push(0x0A);
+
+    // Connection serial number (must match ForwardOpen)
+    cip.extend_from_slice(&1u16.to_le_bytes());
+
+    // Originator vendor ID (must match ForwardOpen)
+    cip.extend_from_slice(&0u16.to_le_bytes());
+
+    // Originator serial number (must match ForwardOpen)
+    cip.extend_from_slice(&0x1234_5678u32.to_le_bytes());
+
+    // Connection path size and path (same as in ForwardOpen)
+    let mut conn_path_segments = Vec::new();
+    if let Some(slot) = slot {
+        conn_path_segments.push(0x01); // port 1
+        conn_path_segments.push(slot); // link = slot
+        conn_path_segments.push(0x00);
+        conn_path_segments.push(0x00);
+    }
+    conn_path_segments.push(0x20); // class
+    conn_path_segments.push(0x02); // Message Router
+    conn_path_segments.push(0x24); // instance
+    conn_path_segments.push(0x01); // instance 1
+
+    let conn_path_words = (conn_path_segments.len() / 2) as u8;
+    cip.push(conn_path_words);
+    cip.extend_from_slice(&conn_path_segments);
+
+    cip
+}

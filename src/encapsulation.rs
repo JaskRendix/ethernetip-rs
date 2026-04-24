@@ -4,6 +4,7 @@ pub const COMMAND_LIST_IDENTITY: u16 = 0x0063;
 pub const COMMAND_REGISTER_SESSION: u16 = 0x0065;
 pub const COMMAND_UNREGISTER_SESSION: u16 = 0x0066;
 pub const COMMAND_SEND_RR_DATA: u16 = 0x006F;
+pub const COMMAND_SEND_UNIT_DATA: u16 = 0x0070;
 
 #[derive(Debug, Clone)]
 pub struct EncapsulationHeader {
@@ -54,6 +55,7 @@ impl EncapsulationHeader {
                 | COMMAND_REGISTER_SESSION
                 | COMMAND_UNREGISTER_SESSION
                 | COMMAND_SEND_RR_DATA
+                | COMMAND_SEND_UNIT_DATA
         ) {
             return None;
         }
