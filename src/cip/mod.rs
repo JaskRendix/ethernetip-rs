@@ -88,15 +88,20 @@ fn decode_real_bytes(data: &[u8]) -> Vec<CipValue> {
 ///   UINT length
 ///   SINT data[82]
 fn decode_string_bytes(data: &[u8]) -> Vec<CipValue> {
-    if data.len() < 2 {
-        return Vec::new();
+    const ROCKWELL_STRING_SIZE: usize = 84;
+    let mut out = Vec::new();
+    let mut pos = 0;
+
+    while pos + 2 <= data.len() {
+        let len = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
+        let str_bytes = &data[pos + 2..data.len().min(pos + 2 + len)];
+        out.push(CipValue::String(
+            String::from_utf8_lossy(str_bytes).into_owned(),
+        ));
+        pos += ROCKWELL_STRING_SIZE;
     }
 
-    let len = u16::from_le_bytes([data[0], data[1]]) as usize;
-    let str_bytes = &data[2..data.len().min(2 + len)];
-
-    let s = String::from_utf8_lossy(str_bytes).into_owned();
-    vec![CipValue::String(s)]
+    out
 }
 
 /// Decode a standard CIP single-read response.
@@ -104,9 +109,20 @@ pub fn decode_cip_response(buf: &[u8]) -> Option<CipValue> {
     if buf.len() < 2 {
         return None;
     }
-
     let type_id = u16::from_le_bytes([buf[0], buf[1]]);
+    if type_id == 0x00D3 {
+        return None;
+    }
     let data = &buf[2..];
-
     decode_cip_data_list(type_id, data).into_iter().next()
+}
+
+/// Returns the raw packed bytes as a single CipValue::BoolPacked.
+/// Use this when you intend to write the value back unchanged.
+pub fn decode_cip_data_packed(type_id: u16, data: &[u8]) -> Option<CipValue> {
+    if type_id == 0x00D3 {
+        Some(CipValue::BoolPacked(data.to_vec()))
+    } else {
+        None
+    }
 }

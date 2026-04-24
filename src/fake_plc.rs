@@ -142,6 +142,8 @@ fn handle_read(cip: &[u8]) -> Vec<u8> {
         "LINTTag" => fake_read_lint(elem_count),
         "REALTag" => fake_read_real(elem_count),
         "BOOLTag" => fake_read_bool(elem_count),
+        "SINTTag" => fake_read_sint(elem_count),
+        "INTTag" => fake_read_int(elem_count),
         "PackedBoolTag" => fake_read_bool_packed(elem_count),
         "StringTag" => fake_read_string(),
         _ => fake_read_dint(elem_count),
@@ -183,6 +185,18 @@ fn handle_read_fragmented(cip: &[u8]) -> Vec<u8> {
                 v.extend_from_slice(&val.to_le_bytes());
             }
             (0x00C5u16, v)
+        }
+        "SINTTag" => {
+            let v: Vec<u8> = (0..count).map(|i| (10 + i) as u8).collect();
+            (0x00C2u16, v)
+        }
+        "INTTag" => {
+            let mut v = Vec::new();
+            for i in 0..count {
+                let val: i16 = 1000 + i as i16;
+                v.extend_from_slice(&val.to_le_bytes());
+            }
+            (0x00C3u16, v)
         }
         "PackedBoolTag" => (0x00D3u16, vec![0b01010101]),
         _ => {
@@ -289,6 +303,23 @@ fn fake_read_string() -> Vec<u8> {
     out.extend_from_slice(&len.to_le_bytes());
     out.extend_from_slice(s);
     out.extend(std::iter::repeat_n(0, 82 - s.len()));
+    out
+}
+
+fn fake_read_sint(count: usize) -> Vec<u8> {
+    let mut out = vec![0x4C | 0x80, 0x00, 0x00, 0x00, 0xC2, 0x00];
+    for i in 0..count {
+        out.push((10 + i as i8) as u8);
+    }
+    out
+}
+
+fn fake_read_int(count: usize) -> Vec<u8> {
+    let mut out = vec![0x4C | 0x80, 0x00, 0x00, 0x00, 0xC3, 0x00];
+    for i in 0..count {
+        let v: i16 = 1000 + i as i16;
+        out.extend_from_slice(&v.to_le_bytes());
+    }
     out
 }
 

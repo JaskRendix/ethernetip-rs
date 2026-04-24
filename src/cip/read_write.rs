@@ -73,6 +73,12 @@ pub fn build_write_request(tag: &str, value: &CipValue, slot: Option<u8>) -> Vec
             }
         }
 
+        CipValue::BoolPacked(bytes) => {
+            cip.extend_from_slice(&(CipType::BoolPacked as u16).to_le_bytes());
+            cip.extend_from_slice(&(bytes.len() as u16).to_le_bytes()); // element count = number of packed bytes
+            cip.extend_from_slice(bytes);
+        }
+
         CipValue::Unit => {
             // No payload
         }

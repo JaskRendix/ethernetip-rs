@@ -11,6 +11,20 @@ pub enum CipType {
 }
 
 impl CipType {
+    pub fn from_u16(w: u16) -> Option<Self> {
+        match w {
+            0x00C1 => Some(Self::Bool),
+            0x00C2 => Some(Self::SInt),
+            0x00C3 => Some(Self::Int),
+            0x00C4 => Some(Self::DInt),
+            0x00C5 => Some(Self::LInt),
+            0x00CA => Some(Self::Real),
+            0x00D0 => Some(Self::String),
+            0x00D3 => Some(Self::BoolPacked),
+            _ => None,
+        }
+    }
+
     pub fn from_u8(b: u8) -> Option<Self> {
         match b {
             0xC1 => Some(Self::Bool),
@@ -35,6 +49,7 @@ pub enum CipValue {
     LInt(i64),
     Real(f32),
     String(String),
+    BoolPacked(Vec<u8>),
     Unit,
 }
 
