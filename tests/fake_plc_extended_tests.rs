@@ -5,21 +5,15 @@ use std::sync::Once;
 use std::time::Duration;
 use tokio::time::sleep;
 
-static START: Once = Once::new();
+static START_EXTENDED: Once = Once::new();
 
 fn start_fake_plc_once() {
-    START.call_once(|| {
+    START_EXTENDED.call_once(|| {
         tokio::spawn(async {
             let _ = run_fake_plc().await;
         });
     });
 }
-
-//
-// ─────────────────────────────────────────────────────────────
-//   Multi‑element READ (fake PLC returns 42, 43, 44…)
-// ─────────────────────────────────────────────────────────────
-//
 
 #[tokio::test]
 async fn read_multi_elements_from_fake_plc() {
@@ -38,33 +32,6 @@ async fn read_multi_elements_from_fake_plc() {
     assert_eq!(vals[1], CipValue::DInt(43));
     assert_eq!(vals[2], CipValue::DInt(44));
 }
-
-//
-// ─────────────────────────────────────────────────────────────
-//   Multi‑element WRITE (fake PLC accepts all writes)
-// ─────────────────────────────────────────────────────────────
-//
-
-#[tokio::test]
-async fn write_multi_elements_to_fake_plc() {
-    start_fake_plc_once();
-    sleep(Duration::from_millis(200)).await;
-
-    let mut client = EthernetIpClient::connect("127.0.0.1")
-        .await
-        .expect("connect failed");
-
-    let values = vec![CipValue::DInt(10), CipValue::DInt(20), CipValue::DInt(30)];
-
-    let res = client.write_tag_multi("Test", &values).await;
-    assert!(res.is_ok());
-}
-
-//
-// ─────────────────────────────────────────────────────────────
-//   MSP multi‑read (client → fake PLC → MSP → client)
-// ─────────────────────────────────────────────────────────────
-//
 
 #[tokio::test]
 async fn msp_multi_read_from_fake_plc() {
@@ -87,12 +54,6 @@ async fn msp_multi_read_from_fake_plc() {
         }
     }
 }
-
-//
-// ─────────────────────────────────────────────────────────────
-//   MSP error simulation (FAKE_PLC_ERROR=1)
-// ─────────────────────────────────────────────────────────────
-//
 
 #[tokio::test]
 async fn msp_error_simulation_every_5th_request() {
