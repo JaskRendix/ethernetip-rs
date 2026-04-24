@@ -4,7 +4,6 @@ pub mod msp;
 pub mod read_write;
 pub mod service;
 pub mod symbol;
-pub mod value;
 
 use crate::types::CipValue;
 pub use epath::*;
