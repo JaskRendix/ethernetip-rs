@@ -7,7 +7,9 @@ The library provides an async API for reading and writing CIP tags, including ar
 
 ## Overview
 
-`ethernetip-rs` implements the unconnected CIP messaging path used by Rockwell Logix controllers.  
+`ethernetip-rs` implements both unconnected and connected CIP explicit messaging for
+Rockwell Logix controllers. The client supports standard SendRRData requests as well
+as Class‑3 connected messaging via Forward Open / Forward Close and SendUnitData.  
 It supports CompactLogix (no routing) and ControlLogix (CPU in a chassis slot).  
 A deterministic fake PLC is included for development and testing.
 
@@ -29,6 +31,11 @@ A deterministic fake PLC is included for development and testing.
 - Async API using `tokio`  
 - Fake PLC for integration tests  
 - Deterministic behavior for CI environments  
+- Connected explicit messaging (Class 3)
+  - Forward Open / Forward Close
+  - SendUnitData transport
+  - connection ID + sequence counter tracking
+  - automatic routing of CIP requests over RR‑Data or Unit‑Data  
 
 ### Supported CIP types
 
@@ -172,12 +179,13 @@ cargo run
 
 ## Future improvements
 
-- Forward Open / Forward Close  
+- Additional connection types (large forward open, redundant owner)
+- Automatic reconnect for connected sessions
+- Implicit I/O (UDP)
 - Class/instance/attribute access for non‑Logix devices  
 - More realistic fake PLC behavior  
 - Retry and backoff logic  
 - Benchmarks for MSP and array operations  
-- Optional implicit I/O (UDP)
 
 ---
 
