@@ -32,11 +32,13 @@ A deterministic fake PLC is included for development and testing.
 
 ### Supported CIP types
 
-- BOOL  
-- SINT  
-- INT  
-- DINT  
-- REAL  
+- BOOL (including packed BOOL arrays)
+- SINT
+- INT
+- DINT
+- LINT
+- REAL
+- STRING
 
 ---
 
@@ -172,11 +174,10 @@ cargo run
 
 - Forward Open / Forward Close  
 - Class/instance/attribute access for non‑Logix devices  
-- Additional CIP types (STRING, structures, LINT)  
 - More realistic fake PLC behavior  
 - Retry and backoff logic  
 - Benchmarks for MSP and array operations  
-- Optional implicit I/O (UDP)  
+- Optional implicit I/O (UDP)
 
 ---
 
