@@ -1,21 +1,24 @@
-# ethernetip‑rs
+# **ethernetip‑rs**
 
 A Rust implementation of the EtherNet/IP™ protocol for symbolic tag access on Allen‑Bradley ControlLogix and CompactLogix PLCs.  
-The library provides a clean async API for reading and writing CIP tags, including arrays and multi‑tag operations, with correct EPATH encoding and optional slot routing.
+The library provides an async API for reading and writing CIP tags, including arrays, fragmented reads, and multi‑tag operations, with correct EPATH encoding and optional slot routing.
 
 ---
 
 ## Overview
 
 `ethernetip-rs` implements the unconnected CIP messaging path used by Rockwell Logix controllers.  
-It supports both CompactLogix (no routing) and ControlLogix (CPU in a chassis slot), and includes a fully deterministic fake PLC for local development and testing.
+It supports CompactLogix (no routing) and ControlLogix (CPU in a chassis slot).  
+A deterministic fake PLC is included for development and testing.
 
 ### Features
 
 - Read a single tag  
 - Write a single tag  
-- Read multiple elements (array fragments)  
-- Write multiple elements  
+- Read arrays  
+  - unfragmented reads for small arrays  
+  - CIP Fragmented Read (0x52) for large arrays  
+- Write arrays  
 - Multiple Service Packet (MSP) multi‑tag read  
 - Correct CIP EPATH encoding  
   - symbolic segments  
@@ -24,8 +27,16 @@ It supports both CompactLogix (no routing) and ControlLogix (CPU in a chassis sl
   - struct members  
   - slot routing  
 - Async API using `tokio`  
-- Optional fake PLC for integration tests  
+- Fake PLC for integration tests  
 - Deterministic behavior for CI environments  
+
+### Supported CIP types
+
+- BOOL  
+- SINT  
+- INT  
+- DINT  
+- REAL  
 
 ---
 
@@ -33,8 +44,8 @@ It supports both CompactLogix (no routing) and ControlLogix (CPU in a chassis sl
 
 ControlLogix systems require routing through the backplane:
 
-- CompactLogix: CPU is the Ethernet endpoint → no routing  
-- ControlLogix: CPU resides in a slot → slot must be encoded in the EPATH  
+- CompactLogix: CPU is the Ethernet endpoint  
+- ControlLogix: CPU resides in a slot  
 
 Example:
 
@@ -42,7 +53,7 @@ Example:
 client.set_slot(2); // CPU in slot 2
 ```
 
-Slot routing is applied consistently across all read/write operations.
+Routing is applied across all read and write operations.
 
 ---
 
@@ -55,15 +66,12 @@ use ethernetip::types::CipValue;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut client = EthernetIpClient::connect("192.168.1.10").await?;
-
-    // For ControlLogix racks
     client.set_slot(0);
 
     let value = client.read_tag("MyTag").await?;
     println!("Value: {:?}", value);
 
     client.write_tag("MyTag", CipValue::DInt(42)).await?;
-
     Ok(())
 }
 ```
@@ -72,10 +80,28 @@ async fn main() -> anyhow::Result<()> {
 
 ## Reading arrays
 
+### Small arrays (single packet)
+
 ```rust
 let values = client.read_tag_multi("MyArray", 10).await?;
-println!("First 10 elements: {:?}", values);
 ```
+
+### Large arrays (fragmented read)
+
+Logix controllers limit unfragmented reads to ~480 bytes.  
+`read_array()` performs CIP Fragmented Read (0x52) and reconstructs the full payload.
+
+```rust
+let values = client.read_array("LargeArray", 2000).await?;
+```
+
+The client handles:
+
+- type ID extraction  
+- partial transfer status (0x06)  
+- offset increments  
+- fragment concatenation  
+- decoding into `Vec<CipValue>`  
 
 ---
 
@@ -108,20 +134,19 @@ for r in results {
 }
 ```
 
-MSP allows batching multiple CIP requests into a single round‑trip.
+MSP batches multiple CIP requests into one round‑trip.
 
 ---
 
 ## Fake PLC for testing
 
-A deterministic fake PLC is included for local development and CI.  
-It implements:
+The fake PLC supports:
 
-- Read (single + array)  
-- Write (single + array)  
+- read (single and array)  
+- write (single and array)  
 - MSP  
-- Symbol browse  
-- Error simulation (every 5th request when `FAKE_PLC_ERROR=1`)  
+- symbol browse  
+- error simulation (`FAKE_PLC_ERROR=1`)  
 
 Example:
 
@@ -131,7 +156,7 @@ tokio::spawn(async {
 });
 ```
 
-This allows full end‑to‑end testing without hardware.
+This enables end‑to‑end tests without hardware.
 
 ---
 
@@ -145,19 +170,18 @@ cargo run
 
 ## Future improvements
 
-These are non‑committal ideas for future expansion:
-
-- Forward Open / Forward Close (connected messaging)  
+- Forward Open / Forward Close  
 - Class/instance/attribute access for non‑Logix devices  
-- Additional CIP types (SINT, REAL arrays, STRING, structures)  
+- Additional CIP types (STRING, structures, LINT)  
 - More realistic fake PLC behavior  
-- Retry/backoff logic  
+- Retry and backoff logic  
 - Benchmarks for MSP and array operations  
-- Optional implicit I/O (UDP) support  
+- Optional implicit I/O (UDP)  
 
 ---
 
 ## Notes
 
-This project originated as a technical exercise and evolved into a functional EtherNet/IP implementation.  
-Real hardware testing is recommended for production use, but the fake PLC and test suite provide strong baseline validation.
+This project began as a technical exercise and grew into a functional EtherNet/IP implementation.  
+Hardware testing is recommended for production use.  
+The fake PLC and test suite provide a baseline for development and CI.
