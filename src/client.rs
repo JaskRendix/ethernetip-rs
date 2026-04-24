@@ -230,21 +230,11 @@ impl EthernetIpClient {
             return Err(io::Error::other("CIP multi read response too short"));
         }
 
-        // For now we assume DINT array, matching fake_plc behavior.
-        let mut out = Vec::new();
-        let mut pos = data_start + 2; // skip CIP type + pad
+        // Extract type ID
+        let type_id = u16::from_le_bytes([res[data_start], res[data_start + 1]]);
+        let payload = &res[data_start + 2..];
 
-        for _ in 0..count {
-            if pos + 4 > res.len() {
-                return Err(io::Error::other("CIP multi read payload truncated"));
-            }
-
-            let v = i32::from_le_bytes([res[pos], res[pos + 1], res[pos + 2], res[pos + 3]]);
-            out.push(CipValue::DInt(v));
-            pos += 4;
-        }
-
-        Ok(out)
+        Ok(crate::cip::decode_cip_data_list(type_id, payload))
     }
 
     pub async fn write_tag_multi(&mut self, tag: &str, values: &[CipValue]) -> io::Result<()> {

@@ -4,7 +4,10 @@ pub enum CipType {
     SInt = 0xC2,
     Int = 0xC3,
     DInt = 0xC4,
+    LInt = 0xC5,
     Real = 0xCA,
+    String = 0xD0,
+    BoolPacked = 0xD3,
 }
 
 impl CipType {
@@ -14,7 +17,10 @@ impl CipType {
             0xC2 => Some(Self::SInt),
             0xC3 => Some(Self::Int),
             0xC4 => Some(Self::DInt),
+            0xC5 => Some(Self::LInt),
             0xCA => Some(Self::Real),
+            0xD0 => Some(Self::String),
+            0xD3 => Some(Self::BoolPacked),
             _ => None,
         }
     }
@@ -26,7 +32,9 @@ pub enum CipValue {
     SInt(i8),
     Int(i16),
     DInt(i32),
+    LInt(i64),
     Real(f32),
+    String(String),
     Unit,
 }
 
