@@ -1,8 +1,8 @@
 use ethernetip::cip::{
     build_forward_close_request, build_forward_open_request, build_large_forward_close_request,
     build_large_forward_open_request, build_read_fragmented_request, build_read_request,
-    build_write_request, decode_extended_status, describe_extended_status, service::CipService,
-    ConnectionParams, TransportTrigger,
+    build_write_request, decode_extended_status, describe_extended_status, map_extended_status,
+    service::CipService, ConnectionParams, ForwardOpenError, TransportTrigger,
 };
 use ethernetip::types::{CipType, CipValue};
 
@@ -203,4 +203,15 @@ fn test_connection_params_validation() {
     };
 
     assert!(bad.validate().is_err());
+}
+
+#[test]
+fn test_forward_open_error_enum_mapping() {
+    let words = vec![0x0205];
+    let err = map_extended_status(&words);
+
+    match err {
+        ForwardOpenError::InvalidRpi => {}
+        _ => panic!("wrong mapping"),
+    }
 }

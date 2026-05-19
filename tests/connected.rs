@@ -1,6 +1,8 @@
 use ethernetip::{types::CipValue, EthernetIpClient};
+use serial_test::serial;
 
 #[tokio::test]
+#[serial]
 async fn test_forward_open_and_close() {
     tokio::spawn(async {
         ethernetip::fake_plc::run_fake_plc().await.unwrap();
@@ -19,6 +21,7 @@ async fn test_forward_open_and_close() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_connected_read_write() {
     tokio::spawn(async {
         ethernetip::fake_plc::run_fake_plc().await.unwrap();
@@ -42,6 +45,7 @@ async fn test_connected_read_write() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_unit_data_without_connection_fails() {
     tokio::spawn(async {
         ethernetip::fake_plc::run_fake_plc().await.unwrap();
@@ -58,6 +62,7 @@ async fn test_unit_data_without_connection_fails() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_sequence_counter_increments() {
     tokio::spawn(async {
         ethernetip::fake_plc::run_fake_plc().await.unwrap();

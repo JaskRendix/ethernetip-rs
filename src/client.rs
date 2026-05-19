@@ -474,7 +474,7 @@ impl EthernetIpClient {
         Ok(crate::cip::decode_cip_data_list(type_id, &raw))
     }
 
-    pub async fn forward_open(&mut self) -> io::Result<()> {
+    pub async fn forward_open(&mut self) -> Result<(), ForwardOpenError> {
         let cip = build_forward_open_request(self.slot, self.connection_params);
 
         let res = if self.connected {
@@ -483,16 +483,20 @@ impl EthernetIpClient {
             self.send_rr_data(cip).await?
         };
         if res.len() < 10 {
-            return Err(io::Error::other("ForwardOpen response too short"));
+            return Err(ForwardOpenError::Other(
+                "ForwardOpen response too short".into(),
+            ));
         }
 
         let status = res[2];
         if status != 0 {
             let ext = decode_extended_status(&res);
-            let desc = describe_extended_status(&ext)
-                .unwrap_or_else(|| format!("General status 0x{:02X}", status));
 
-            return Err(io::Error::other(format!("ForwardOpen failed: {}", desc)));
+            if !ext.is_empty() {
+                return Err(map_extended_status(&ext));
+            }
+
+            return Err(ForwardOpenError::GeneralStatus(status));
         }
 
         let conn_id = u32::from_le_bytes([res[6], res[7], res[8], res[9]]);
@@ -614,7 +618,9 @@ impl EthernetIpClient {
         }
 
         // 2) Try normal Forward Open
-        self.forward_open().await
+        self.forward_open()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     pub async fn large_forward_close(&mut self) -> io::Result<()> {
