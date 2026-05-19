@@ -23,6 +23,14 @@ impl From<u8> for CipError {
     }
 }
 
+impl std::fmt::Display for CipError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for CipError {}
+
 #[derive(Debug)]
 pub enum ForwardOpenError {
     GeneralStatus(u8),

@@ -174,104 +174,113 @@ impl EthernetIpClient {
         Err(io::Error::other("No CIP data item found in CPF"))
     }
 
-    pub async fn browse_symbols(&mut self) -> io::Result<Vec<SymbolInfo>> {
+    pub async fn browse_symbols(&mut self) -> Result<Vec<SymbolInfo>, CipError> {
         let cip = build_symbol_browse_request();
-        let res = if self.connected {
-            self.send_unit_data(cip).await?
-        } else {
-            self.send_rr_data(cip).await?
-        };
 
+        // Transport layer stays io::Error → map into CIP domain
+        let res = if self.connected {
+            self.send_unit_data(cip).await
+        } else {
+            self.send_rr_data(cip).await
+        }
+        .map_err(|_| CipError::VendorSpecific(0xFF))?;
+
+        // CIP response must be at least 4 bytes
         if res.len() < 4 {
-            return Err(io::Error::other("Malformed CIP response for symbol browse"));
+            return Err(CipError::VendorSpecific(0xFE)); // malformed
         }
 
         let general_status = res[2];
         if general_status != 0 {
-            return Err(io::Error::other(format!(
-                "PLC returned error 0x{:02X} for symbol browse",
-                general_status
-            )));
+            return Err(CipError::from(general_status));
         }
 
         let ext_words = res[3] as usize;
         let data_start = 4 + ext_words * 2;
+
         if res.len() < data_start {
-            return Err(io::Error::other("Symbol browse response too short"));
+            return Err(CipError::VendorSpecific(0xFD)); // too short
         }
 
         let symbols = parse_symbol_browse_response(&res[data_start..]);
         Ok(symbols)
     }
 
-    pub async fn read_tag(&mut self, tag: &str) -> io::Result<CipValue> {
+    pub async fn read_tag(&mut self, tag: &str) -> Result<CipValue, CipError> {
         let cip = build_read_request(tag, self.slot);
 
+        // Transport layer stays io::Error
         let res = if self.connected {
-            self.send_unit_data(cip).await?
+            self.send_unit_data(cip).await
         } else {
-            self.send_rr_data(cip).await?
-        };
+            self.send_rr_data(cip).await
+        }
+        .map_err(|_e| CipError::VendorSpecific(0xFF))?; // transport failure → CIP error domain
 
         if res.len() < 4 {
-            return Err(io::Error::other("Malformed CIP read response"));
+            return Err(CipError::VendorSpecific(0xFE)); // malformed response
         }
 
         let general_status = res[2];
         if general_status != 0 {
-            return Err(io::Error::other(format!(
-                "PLC returned error 0x{:02X}",
-                general_status
-            )));
+            return Err(CipError::from(general_status));
         }
 
         let ext_words = res[3] as usize;
         let data_start = 4 + ext_words * 2;
         if res.len() < data_start {
-            return Err(io::Error::other("CIP read response too short"));
+            return Err(CipError::VendorSpecific(0xFD)); // too short
         }
 
-        decode_cip_response(&res[data_start..]).ok_or(io::Error::other("Decode error"))
+        decode_cip_response(&res[data_start..]).ok_or(CipError::VendorSpecific(0xFC))
+        // decode error
     }
 
-    pub async fn write_tag(&mut self, tag: &str, value: CipValue) -> io::Result<()> {
+    pub async fn write_tag(&mut self, tag: &str, value: CipValue) -> Result<(), CipError> {
         let cip = build_write_request(tag, &value, self.slot);
-        let res = if self.connected {
-            self.send_unit_data(cip).await?
-        } else {
-            self.send_rr_data(cip).await?
-        };
 
-        decode_write_response(&res).map_err(|status| {
-            io::Error::other(format!("PLC returned write error 0x{:02X}", status))
-        })
+        let res = if self.connected {
+            self.send_unit_data(cip).await
+        } else {
+            self.send_rr_data(cip).await
+        }
+        .map_err(|_| CipError::VendorSpecific(0xFF))?;
+
+        match decode_write_response(&res) {
+            Ok(()) => Ok(()),
+            Err(status) => Err(CipError::from(status)),
+        }
     }
 
-    pub async fn read_tag_multi(&mut self, tag: &str, count: usize) -> io::Result<Vec<CipValue>> {
+    pub async fn read_tag_multi(
+        &mut self,
+        tag: &str,
+        count: usize,
+    ) -> Result<Vec<CipValue>, CipError> {
         let cip = build_read_request_count(tag, count, self.slot);
+
+        // Transport layer stays io::Error → map into CIP domain
         let res = if self.connected {
-            self.send_unit_data(cip).await?
+            self.send_unit_data(cip).await
         } else {
-            self.send_rr_data(cip).await?
-        };
+            self.send_rr_data(cip).await
+        }
+        .map_err(|_| CipError::VendorSpecific(0xFF))?;
 
         if res.len() < 4 {
-            return Err(io::Error::other("Malformed CIP read response"));
+            return Err(CipError::VendorSpecific(0xFE)); // malformed
         }
 
         let general_status = res[2];
         if general_status != 0 {
-            return Err(io::Error::other(format!(
-                "PLC returned error 0x{:02X}",
-                general_status
-            )));
+            return Err(CipError::from(general_status));
         }
 
         let ext_words = res[3] as usize;
         let data_start = 4 + ext_words * 2;
 
         if res.len() < data_start + 2 {
-            return Err(io::Error::other("CIP multi read response too short"));
+            return Err(CipError::VendorSpecific(0xFD)); // too short
         }
 
         // Extract type ID
@@ -281,7 +290,11 @@ impl EthernetIpClient {
         Ok(crate::cip::decode_cip_data_list(type_id, payload))
     }
 
-    pub async fn write_tag_multi(&mut self, tag: &str, values: &[CipValue]) -> io::Result<()> {
+    pub async fn write_tag_multi(
+        &mut self,
+        tag: &str,
+        values: &[CipValue],
+    ) -> Result<(), CipError> {
         for (i, v) in values.iter().enumerate() {
             let indexed = format!("{tag}[{i}]");
             self.write_tag(&indexed, v.clone()).await?;
@@ -289,7 +302,10 @@ impl EthernetIpClient {
         Ok(())
     }
 
-    pub async fn read_tags_msp(&mut self, tags: &[&str]) -> io::Result<Vec<MultiResult<CipValue>>> {
+    pub async fn read_tags_msp(
+        &mut self,
+        tags: &[&str],
+    ) -> Result<Vec<MultiResult<CipValue>>, CipError> {
         let mut reqs = Vec::with_capacity(tags.len());
         for tag in tags {
             let cip = build_read_request(tag, self.slot);
@@ -297,11 +313,16 @@ impl EthernetIpClient {
         }
 
         let msp = build_cip_multiple_service_request(&reqs);
+
+        // Transport → CIP fallback
         let res = if self.connected {
-            self.send_unit_data(msp).await?
+            self.send_unit_data(msp).await
         } else {
-            self.send_rr_data(msp).await?
-        };
+            self.send_rr_data(msp).await
+        }
+        .map_err(|_| CipError::VendorSpecific(0xFF))?;
+
+        // MSP parser handles CIP status codes internally
         Ok(parse_cip_multiple_service_response(&res))
     }
 
@@ -417,21 +438,24 @@ impl EthernetIpClient {
         &mut self,
         tag: &str,
         count: u16,
-    ) -> io::Result<(u16, Vec<u8>)> {
+    ) -> Result<(u16, Vec<u8>), CipError> {
         let mut all_data = Vec::new();
         let mut offset: u32 = 0;
         let mut type_id: u16 = 0;
 
         loop {
             let cip = build_read_fragmented_request(tag, count, offset, self.slot);
+
+            // Transport layer stays io::Error → map into CIP domain
             let res = if self.connected {
-                self.send_unit_data(cip).await?
+                self.send_unit_data(cip).await
             } else {
-                self.send_rr_data(cip).await?
-            };
+                self.send_rr_data(cip).await
+            }
+            .map_err(|_e| CipError::VendorSpecific(0xFF))?;
 
             if res.len() < 4 {
-                return Err(io::Error::other("Fragmented response too short"));
+                return Err(CipError::VendorSpecific(0xFE)); // malformed
             }
 
             let general_status = res[2];
@@ -439,14 +463,15 @@ impl EthernetIpClient {
             let data_start = 4 + (ext_words * 2);
 
             if res.len() < data_start {
-                return Err(io::Error::other("No payload in fragment response"));
+                return Err(CipError::VendorSpecific(0xFD)); // no payload
             }
 
             let mut payload = &res[data_start..];
 
+            // First fragment contains Type ID
             if offset == 0 {
                 if payload.len() < 2 {
-                    return Err(io::Error::other("Missing Type ID in first fragment"));
+                    return Err(CipError::VendorSpecific(0xFC)); // missing type ID
                 }
                 type_id = u16::from_le_bytes([payload[0], payload[1]]);
                 payload = &payload[2..];
@@ -455,21 +480,16 @@ impl EthernetIpClient {
             all_data.extend_from_slice(payload);
 
             match general_status {
-                0x00 => break,
-                0x06 => offset = all_data.len() as u32,
-                _ => {
-                    return Err(io::Error::other(format!(
-                        "PLC Error: 0x{:02X}",
-                        general_status
-                    )))
-                }
+                0x00 => break,                          // done
+                0x06 => offset = all_data.len() as u32, // partial transfer → continue
+                other => return Err(CipError::from(other)),
             }
         }
 
         Ok((type_id, all_data))
     }
 
-    pub async fn read_array(&mut self, tag: &str, count: u16) -> io::Result<Vec<CipValue>> {
+    pub async fn read_array(&mut self, tag: &str, count: u16) -> Result<Vec<CipValue>, CipError> {
         let (type_id, raw) = self.read_tag_fragmented(tag, count).await?;
         Ok(crate::cip::decode_cip_data_list(type_id, &raw))
     }
