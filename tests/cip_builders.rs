@@ -192,3 +192,15 @@ fn test_decode_extended_status() {
     assert!(desc.contains("Invalid RPI"));
     assert!(desc.contains("Insufficient resources"));
 }
+
+#[test]
+fn test_connection_params_validation() {
+    let bad = ConnectionParams {
+        rpi: 0,
+        o_to_t_size: 100,
+        t_to_o_size: 100,
+        trigger: TransportTrigger::Class3ClientInitiated,
+    };
+
+    assert!(bad.validate().is_err());
+}

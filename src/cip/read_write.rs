@@ -38,6 +38,28 @@ impl Default for ConnectionParams {
     }
 }
 
+impl ConnectionParams {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.rpi == 0 {
+            return Err("RPI must be > 0");
+        }
+
+        if self.o_to_t_size == 0 {
+            return Err("O->T size must be > 0");
+        }
+
+        if self.o_to_t_size > 4000 {
+            return Err("O->T size too large");
+        }
+
+        if self.t_to_o_size > 4000 {
+            return Err("T->O size too large");
+        }
+
+        Ok(())
+    }
+}
+
 pub fn build_read_request(tag: &str, slot: Option<u8>) -> Vec<u8> {
     let epath = encode_epath_with_slot(tag, slot);
 
@@ -169,6 +191,8 @@ fn encode_connection_manager_path(slot: Option<u8>) -> Vec<u8> {
 }
 
 pub fn build_forward_open_request(slot: Option<u8>, params: ConnectionParams) -> Vec<u8> {
+    params.validate().expect("Invalid ConnectionParams");
+
     let path = encode_connection_manager_path(slot);
 
     let mut cip = Vec::new();
@@ -275,6 +299,8 @@ pub fn build_forward_close_request(slot: Option<u8>) -> Vec<u8> {
 }
 
 pub fn build_large_forward_open_request(slot: Option<u8>, params: ConnectionParams) -> Vec<u8> {
+    params.validate().expect("Invalid ConnectionParams");
+
     let path = encode_connection_manager_path(slot);
 
     let mut cip = Vec::new();
