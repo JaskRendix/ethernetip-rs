@@ -1,4 +1,8 @@
-use ethernetip::{types::CipValue, EthernetIpClient};
+use ethernetip::types::CipValue;
+use ethernetip::EthernetIpClient;
+
+use ethernetip::client::{Connectable, ConnectedMessaging, ConnectionManagement, TagReadWrite};
+
 use serial_test::serial;
 
 #[tokio::test]

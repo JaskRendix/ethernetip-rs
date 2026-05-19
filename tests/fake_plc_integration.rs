@@ -1,11 +1,17 @@
-use ethernetip::cip::*;
-use ethernetip::types::{CipType, CipValue};
-use ethernetip::EthernetIpClient;
-use std::time::Duration;
-use tokio::time::sleep;
-
 mod common;
 use common::start_fake_plc_global;
+
+use ethernetip::cip::{
+    build_read_request, build_write_request, decode_cip_response, encode_epath,
+    encode_epath_with_slot, CipError,
+};
+use ethernetip::types::{CipType, CipValue};
+use ethernetip::EthernetIpClient;
+
+use ethernetip::client::{Connectable, FragmentedRead, SymbolBrowsing, TagReadWrite};
+
+use std::time::Duration;
+use tokio::time::sleep;
 
 #[tokio::test]
 async fn read_from_fake_plc() {

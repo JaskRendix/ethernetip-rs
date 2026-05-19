@@ -1,7 +1,10 @@
 mod common;
 use common::start_fake_plc_global;
+
+use ethernetip::client::{Connectable, MultipleServicePacket, TagReadWrite};
 use ethernetip::types::{CipValue, MultiResult};
 use ethernetip::EthernetIpClient;
+
 use std::time::Duration;
 use tokio::time::sleep;
 

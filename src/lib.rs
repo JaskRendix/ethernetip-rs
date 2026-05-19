@@ -11,4 +11,10 @@ pub use cip::{
 };
 
 pub use client::EthernetIpClient;
+
+pub use client::{
+    Connectable, ConnectedMessaging, ConnectionManagement, FragmentedRead, MultipleServicePacket,
+    SymbolBrowsing, TagReadWrite,
+};
+
 pub use types::{CipType, CipValue, MultiResult};

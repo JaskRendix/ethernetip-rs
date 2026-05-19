@@ -1,5 +1,6 @@
 use anyhow::Result;
-use ethernetip::{client::EthernetIpClient, fake_plc::run_fake_plc};
+use ethernetip::fake_plc::run_fake_plc;
+use ethernetip::{Connectable, EthernetIpClient, TagReadWrite};
 
 #[tokio::main]
 async fn main() -> Result<()> {
