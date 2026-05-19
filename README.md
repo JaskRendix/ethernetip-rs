@@ -1,16 +1,15 @@
 # **ethernetip‑rs**
 
 A Rust implementation of the EtherNet/IP™ protocol for symbolic tag access on Allen‑Bradley ControlLogix and CompactLogix PLCs.  
-The library provides an async API for reading and writing CIP tags, including typed accessors, arrays, fragmented reads, and multi‑tag operations, with correct EPATH encoding and optional slot routing.
+The library provides an async API for reading and writing CIP tags, including typed accessors, arrays, fragmented reads, multi‑tag operations, EPATH encoding, and optional slot routing.
 
 ---
 
 ## Overview
 
-`ethernetip-rs` implements both unconnected and connected CIP explicit messaging for
-Rockwell Logix controllers. The client supports standard SendRRData requests as well
-as Class‑3 connected messaging via Forward Open / Forward Close and SendUnitData.  
-It supports CompactLogix (no routing) and ControlLogix (CPU in a chassis slot).  
+`ethernetip-rs` implements unconnected and connected CIP explicit messaging for Rockwell Logix controllers.  
+The client supports SendRRData and Class‑3 connected messaging through Forward Open / Forward Close and SendUnitData.  
+It works with CompactLogix (no routing) and ControlLogix (CPU in a chassis slot).  
 A deterministic fake PLC is included for development and testing.
 
 ### Features
@@ -19,26 +18,26 @@ A deterministic fake PLC is included for development and testing.
   - `read_bool`, `read_sint`, `read_int`, `read_dint`, `read_real`, `read_string`
   - `write_bool`, `write_sint`, `write_int`, `write_dint`, `write_real`, `write_string`
 - Raw tag access (`read_tag`, `write_tag`)
-- Read arrays  
-  - unfragmented reads for small arrays  
-  - CIP Fragmented Read (0x52) for large arrays  
-- Write arrays  
-- Multiple Service Packet (MSP) multi‑tag read  
-- Correct CIP EPATH encoding  
+- Array reads:
+  - single‑packet reads for small arrays  
+  - CIP Fragmented Read (0x52) for large arrays
+- Array writes
+- Multiple Service Packet (MSP) multi‑tag read
+- Correct CIP EPATH encoding:
   - symbolic segments  
   - array indices  
   - multi‑index  
   - struct members  
   - slot routing  
-- Async API using `tokio`  
-- Fake PLC for integration tests  
-- Deterministic behavior for CI environments  
-- Connected explicit messaging (Class 3)
+- Async API using `tokio`
+- Fake PLC for integration tests
+- Deterministic behavior for CI
+- Connected explicit messaging (Class 3):
   - Forward Open / Forward Close
   - Large Forward Open (0x5B) / Large Forward Close (0x5E)
   - SendUnitData transport
-  - connection ID + sequence counter tracking
-  - automatic routing of CIP requests over RR‑Data or Unit‑Data
+  - connection ID and sequence counter tracking
+  - automatic routing over RR‑Data or Unit‑Data
 
 ---
 
@@ -52,8 +51,8 @@ A deterministic fake PLC is included for development and testing.
 - REAL
 - STRING
 
-Typed helpers automatically validate the returned CIP type and return  
-`CipError::TypeMismatch { expected, actual }` when the PLC tag type does not match.
+Typed helpers validate the returned CIP type and return  
+`CipError::TypeMismatch { expected, actual }` when the PLC tag type differs.
 
 ---
 
@@ -65,10 +64,10 @@ ControlLogix systems require routing through the backplane:
 - ControlLogix: CPU resides in a slot  
 
 ```rust
-client.set_slot(2); // CPU in slot 2
+client.set_slot(2);
 ```
 
-Routing is applied across all read and write operations.
+Routing applies to all read and write operations.
 
 ---
 
@@ -93,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-### Raw API (still available)
+### Raw API
 
 ```rust
 use ethernetip::types::CipValue;
@@ -106,13 +105,13 @@ client.write_tag("MyTag", CipValue::DInt(42)).await?;
 
 ## Reading arrays
 
-### Small arrays (single packet)
+### Small arrays
 
 ```rust
 let values = client.read_tag_multi("MyArray", 10).await?;
 ```
 
-### Large arrays (fragmented read)
+### Large arrays (fragmented)
 
 ```rust
 let values = client.read_array("LargeArray", 2000).await?;
@@ -124,7 +123,7 @@ Handles:
 - partial transfer status (0x06)  
 - offset increments  
 - fragment concatenation  
-- decoding into `Vec<CipValue>`  
+- decoding into `Vec<CipValue>`
 
 ---
 
@@ -157,13 +156,13 @@ for r in results {
 }
 ```
 
-MSP batches multiple CIP requests into one round‑trip.
+MSP batches multiple CIP requests into one round trip.
 
 ---
 
 ## Fake PLC for testing
 
-The test suite includes full coverage for CIP request builders, including Forward Open, Large Forward Open, and all EPATH variants.
+The test suite includes coverage for CIP request builders, Forward Open, Large Forward Open, and all EPATH variants.
 
 ---
 
@@ -177,13 +176,13 @@ cargo run
 
 ## Future improvements
 
-- Additional connection types (redundant owner)
+- Additional connection types
 - Automatic reconnect for connected sessions
 - Implicit I/O (UDP)
-- Class/instance/attribute access for non‑Logix devices  
-- More realistic fake PLC behavior  
-- Retry and backoff logic  
-- Benchmarks for MSP and array operations  
+- Class/instance/attribute access for non‑Logix devices
+- More realistic fake PLC behavior
+- Retry and backoff logic
+- Benchmarks for MSP and array operations
 
 ---
 
