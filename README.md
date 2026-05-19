@@ -33,9 +33,20 @@ A deterministic fake PLC is included for development and testing.
 - Deterministic behavior for CI environments  
 - Connected explicit messaging (Class 3)
   - Forward Open / Forward Close
+  - Large Forward Open (0x5B) / Large Forward Close (0x5E)
   - SendUnitData transport
   - connection ID + sequence counter tracking
-  - automatic routing of CIP requests over RR‑Data or Unit‑Data  
+  - automatic routing of CIP requests over RR‑Data or Unit‑Data
+
+### Large Forward Open / Close
+
+The library supports the extended connection services:
+
+- **Large Forward Open (0x5B)**
+- **Large Forward Close (0x5E)**
+
+These allow larger connection parameters (32‑bit) and higher O→T transfer sizes than the standard Forward Open.  
+The client automatically exposes both request builders and can be used in place of the standard connection setup when required by the controller.
 
 ### Supported CIP types
 
@@ -149,23 +160,7 @@ MSP batches multiple CIP requests into one round‑trip.
 
 ## Fake PLC for testing
 
-The fake PLC supports:
-
-- read (single and array)  
-- write (single and array)  
-- MSP  
-- symbol browse  
-- error simulation (`FAKE_PLC_ERROR=1`)  
-
-Example:
-
-```rust
-tokio::spawn(async {
-    ethernetip::fake_plc::run_fake_plc().await.unwrap();
-});
-```
-
-This enables end‑to‑end tests without hardware.
+The test suite includes full coverage for CIP request builders, including Forward Open, Large Forward Open, and all EPATH variants.  
 
 ---
 
@@ -179,7 +174,7 @@ cargo run
 
 ## Future improvements
 
-- Additional connection types (large forward open, redundant owner)
+- Additional connection types (redundant owner)
 - Automatic reconnect for connected sessions
 - Implicit I/O (UDP)
 - Class/instance/attribute access for non‑Logix devices  
