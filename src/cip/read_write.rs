@@ -241,3 +241,112 @@ pub fn build_forward_close_request(slot: Option<u8>) -> Vec<u8> {
 
     cip
 }
+
+pub fn build_large_forward_open_request(slot: Option<u8>) -> Vec<u8> {
+    let path = encode_connection_manager_path(slot);
+
+    let mut cip = Vec::new();
+    cip.push(CipService::LargeForwardOpen as u8);
+    cip.extend_from_slice(&path);
+
+    // Priority/Timeout
+    cip.push(0x0A);
+    cip.push(0x0A);
+
+    // O->T connection ID (assigned by target)
+    cip.extend_from_slice(&0u32.to_le_bytes());
+
+    // T->O connection ID
+    cip.extend_from_slice(&0u32.to_le_bytes());
+
+    // Connection serial number
+    cip.extend_from_slice(&1u16.to_le_bytes());
+
+    // Originator vendor ID
+    cip.extend_from_slice(&0u16.to_le_bytes());
+
+    // Originator serial number
+    cip.extend_from_slice(&0x1234_5678u32.to_le_bytes());
+
+    // Timeout multiplier
+    cip.push(3);
+
+    // Reserved (3 bytes)
+    cip.extend_from_slice(&[0, 0, 0]);
+
+    // O->T RPI (100 ms)
+    cip.extend_from_slice(&100_000u32.to_le_bytes());
+
+    // O->T connection parameters (32‑bit)
+    // Example: variable length, 2000 bytes max
+    let o_to_t_params: u32 = 0x4000_0000 | 2000;
+    cip.extend_from_slice(&o_to_t_params.to_le_bytes());
+
+    // T->O RPI
+    cip.extend_from_slice(&0u32.to_le_bytes());
+
+    // T->O connection parameters (32‑bit)
+    cip.extend_from_slice(&0u32.to_le_bytes());
+
+    // Transport class trigger
+    cip.push(0xA3);
+
+    // Connection path
+    let mut conn_path_segments = Vec::new();
+    if let Some(slot) = slot {
+        conn_path_segments.push(0x01);
+        conn_path_segments.push(slot);
+        conn_path_segments.push(0x00);
+        conn_path_segments.push(0x00);
+    }
+    conn_path_segments.push(0x20);
+    conn_path_segments.push(0x02);
+    conn_path_segments.push(0x24);
+    conn_path_segments.push(0x01);
+
+    let conn_path_words = (conn_path_segments.len() / 2) as u8;
+    cip.push(conn_path_words);
+    cip.extend_from_slice(&conn_path_segments);
+
+    cip
+}
+
+pub fn build_large_forward_close_request(slot: Option<u8>) -> Vec<u8> {
+    let path = encode_connection_manager_path(slot);
+
+    let mut cip = Vec::new();
+    cip.push(CipService::LargeForwardClose as u8);
+    cip.extend_from_slice(&path);
+
+    // Priority/Timeout
+    cip.push(0x0A);
+    cip.push(0x0A);
+
+    // Connection serial number (must match ForwardOpen)
+    cip.extend_from_slice(&1u16.to_le_bytes());
+
+    // Originator vendor ID
+    cip.extend_from_slice(&0u16.to_le_bytes());
+
+    // Originator serial number
+    cip.extend_from_slice(&0x1234_5678u32.to_le_bytes());
+
+    // Connection path (same as Large Forward Open)
+    let mut conn_path_segments = Vec::new();
+    if let Some(slot) = slot {
+        conn_path_segments.push(0x01);
+        conn_path_segments.push(slot);
+        conn_path_segments.push(0x00);
+        conn_path_segments.push(0x00);
+    }
+    conn_path_segments.push(0x20);
+    conn_path_segments.push(0x02);
+    conn_path_segments.push(0x24);
+    conn_path_segments.push(0x01);
+
+    let conn_path_words = (conn_path_segments.len() / 2) as u8;
+    cip.push(conn_path_words);
+    cip.extend_from_slice(&conn_path_segments);
+
+    cip
+}

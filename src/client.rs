@@ -547,4 +547,78 @@ impl EthernetIpClient {
 
         Ok(Self::parse_cpf(&d)?.to_vec())
     }
+
+    pub async fn large_forward_open(&mut self) -> io::Result<()> {
+        let cip = build_large_forward_open_request(self.slot);
+
+        let res = if self.connected {
+            self.send_unit_data(cip).await?
+        } else {
+            self.send_rr_data(cip).await?
+        };
+
+        if res.len() < 10 {
+            return Err(io::Error::other("LargeForwardOpen response too short"));
+        }
+
+        let status = res[2];
+        if status != 0 {
+            return Err(io::Error::other(format!(
+                "LargeForwardOpen failed: 0x{:02X}",
+                status
+            )));
+        }
+
+        let conn_id = u32::from_le_bytes([res[6], res[7], res[8], res[9]]);
+        self.connection_id = Some(conn_id);
+        self.sequence = 1;
+        self.connected = true;
+
+        Ok(())
+    }
+
+    pub async fn forward_open_with_fallback(&mut self) -> io::Result<()> {
+        // 1) Try Large Forward Open first
+        match self.large_forward_open().await {
+            Ok(_) => return Ok(()),
+
+            Err(e) => {
+                // Extract CIP general status if possible
+                let msg = e.to_string();
+
+                // If the PLC explicitly rejected the service, fall back
+                let should_fallback = msg.contains("0x01") || // Connection failure
+                msg.contains("0x20") || // Invalid parameter
+                msg.contains("0x26") || // Unsupported service
+                msg.contains("0x05"); // Path destination unknown
+
+                if !should_fallback {
+                    // Unexpected error → do NOT fallback
+                    return Err(e);
+                }
+            }
+        }
+
+        // 2) Try normal Forward Open
+        self.forward_open().await
+    }
+
+    pub async fn large_forward_close(&mut self) -> io::Result<()> {
+        if self.connection_id.is_none() {
+            return Ok(());
+        }
+
+        let cip = build_large_forward_close_request(self.slot);
+
+        if self.connected {
+            let _ = self.send_unit_data(cip).await;
+        } else {
+            let _ = self.send_rr_data(cip).await;
+        }
+
+        self.connection_id = None;
+        self.connected = false;
+
+        Ok(())
+    }
 }

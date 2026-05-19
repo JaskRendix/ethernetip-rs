@@ -6,4 +6,6 @@ pub enum CipService {
     MultipleService = 0x0A,
     ForwardOpen = 0x54,
     ForwardClose = 0x4E,
+    LargeForwardOpen = 0x5B,
+    LargeForwardClose = 0x5E,
 }
