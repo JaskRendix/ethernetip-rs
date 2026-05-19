@@ -1,7 +1,7 @@
 # **ethernetip‑rs**
 
 A Rust implementation of the EtherNet/IP™ protocol for symbolic tag access on Allen‑Bradley ControlLogix and CompactLogix PLCs.  
-The library provides an async API for reading and writing CIP tags, including typed accessors, arrays, fragmented reads, multi‑tag operations, EPATH encoding, and optional slot routing.
+The library provides an async API for reading and writing CIP tags, including typed accessors, arrays, fragmented reads, multi‑tag operations, EPATH encoding, slot routing, and generic CIP object access.
 
 ---
 
@@ -10,46 +10,78 @@ The library provides an async API for reading and writing CIP tags, including ty
 `ethernetip-rs` implements unconnected and connected CIP explicit messaging for Rockwell Logix controllers.  
 The client supports SendRRData and Class‑3 connected messaging through Forward Open / Forward Close and SendUnitData.  
 It works with CompactLogix (no routing) and ControlLogix (CPU in a chassis slot).  
-A deterministic fake PLC is included for development and testing.
+A deterministic fake PLC is included for development and CI.
 
-### Features
+In addition to symbolic tag access, the library supports **generic CIP object reads**, including:
 
+- Identity Object (class 0x01)  
+- Connection Manager (class 0x06)  
+- Any class/instance/attribute via GetAttributeSingle / GetAttributeAll  
+
+This enables diagnostics and metadata retrieval from both Logix and non‑Logix CIP devices.
+
+---
+
+## Features
+
+### Tag access
 - Typed tag access:
   - `read_bool`, `read_sint`, `read_int`, `read_dint`, `read_real`, `read_string`
   - `write_bool`, `write_sint`, `write_int`, `write_dint`, `write_real`, `write_string`
 - Raw tag access (`read_tag`, `write_tag`)
 - Array reads:
-  - single‑packet reads for small arrays  
+  - single‑packet reads  
   - CIP Fragmented Read (0x52) for large arrays
 - Array writes
 - Multiple Service Packet (MSP) multi‑tag read
-- Correct CIP EPATH encoding:
+
+### CIP object access
+- Generic object attribute reads:
+  - `read_object_attribute(class, instance, attribute)`
+  - `read_object_attributes(class, instance)`
+- Identity Object support:
+  - `read_identity()`
+  - `IdentityInfo` decoding (vendor ID, product code, revision, serial, product name)
+- Connection Manager diagnostics:
+  - `read_connection_manager()`
+  - `ConnectionManagerInfo` decoding (state, watchdog timeout, transport class, etc.)
+
+### Protocol correctness
+- Full CIP EPATH encoding:
   - symbolic segments  
   - array indices  
   - multi‑index  
   - struct members  
   - slot routing  
 - Async API using `tokio`
-- Fake PLC for integration tests
-- Deterministic behavior for CI
 - Connected explicit messaging (Class 3):
-  - Forward Open / Forward Close
-  - Large Forward Open (0x5B) / Large Forward Close (0x5E)
-  - SendUnitData transport
-  - connection ID and sequence counter tracking
-  - automatic routing over RR‑Data or Unit‑Data
+  - Forward Open / Forward Close  
+  - Large Forward Open (0x5B) / Large Forward Close (0x5E)  
+  - SendUnitData transport  
+  - connection ID and sequence counter tracking  
+  - automatic routing over RR‑Data or Unit‑Data  
+
+### Testing
+- Fake PLC for integration tests  
+- Deterministic behavior for CI  
+- Unit tests for:
+  - CIP builders  
+  - EPATH encoding  
+  - IdentityInfo decoding  
+  - ConnectionManagerInfo decoding  
+  - default trait implementations for object access  
 
 ---
 
 ## Supported CIP types
 
-- BOOL (including packed BOOL arrays)
-- SINT
-- INT
-- DINT
-- LINT
-- REAL
-- STRING
+- BOOL (including packed BOOL arrays)  
+- SINT  
+- INT  
+- DINT  
+- LINT  
+- REAL  
+- STRING  
 
 Typed helpers validate the returned CIP type and return  
 `CipError::TypeMismatch { expected, actual }` when the PLC tag type differs.
@@ -92,7 +124,9 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-### Raw API
+---
+
+## Raw API
 
 ```rust
 use ethernetip::types::CipValue;
@@ -123,7 +157,7 @@ Handles:
 - partial transfer status (0x06)  
 - offset increments  
 - fragment concatenation  
-- decoding into `Vec<CipValue>`
+- decoding into `Vec<CipValue>`  
 
 ---
 
@@ -160,9 +194,35 @@ MSP batches multiple CIP requests into one round trip.
 
 ---
 
+## CIP object access examples
+
+### Identity Object
+
+```rust
+let info = client.read_identity().await?;
+println!("Product: {} v{}.{}", info.product_name, info.major, info.minor);
+```
+
+### Connection Manager
+
+```rust
+let cm = client.read_connection_manager().await?;
+println!("Connection state: {:?}", cm.state);
+```
+
+---
+
 ## Fake PLC for testing
 
-The test suite includes coverage for CIP request builders, Forward Open, Large Forward Open, and all EPATH variants.
+The fake PLC simulates:
+
+- tag reads and writes  
+- fragmented reads  
+- MSP  
+- Forward Open / Forward Close  
+- EPATH parsing  
+
+Used extensively in CI to ensure deterministic behavior.
 
 ---
 
@@ -176,13 +236,13 @@ cargo run
 
 ## Future improvements
 
-- Additional connection types
-- Automatic reconnect for connected sessions
-- Implicit I/O (UDP)
-- Class/instance/attribute access for non‑Logix devices
-- More realistic fake PLC behavior
-- Retry and backoff logic
-- Benchmarks for MSP and array operations
+- Additional connection types  
+- Automatic reconnect for connected sessions  
+- Implicit I/O (UDP)  
+- More CIP object models  
+- More realistic fake PLC behavior  
+- Retry and backoff logic  
+- Benchmarks for MSP and array operations  
 
 ---
 
