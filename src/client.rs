@@ -488,10 +488,11 @@ impl EthernetIpClient {
 
         let status = res[2];
         if status != 0 {
-            return Err(io::Error::other(format!(
-                "ForwardOpen failed: 0x{:02X}",
-                status
-            )));
+            let ext = decode_extended_status(&res);
+            let desc = describe_extended_status(&ext)
+                .unwrap_or_else(|| format!("General status 0x{:02X}", status));
+
+            return Err(io::Error::other(format!("ForwardOpen failed: {}", desc)));
         }
 
         let conn_id = u32::from_le_bytes([res[6], res[7], res[8], res[9]]);

@@ -1,7 +1,8 @@
 use ethernetip::cip::{
     build_forward_close_request, build_forward_open_request, build_large_forward_close_request,
     build_large_forward_open_request, build_read_fragmented_request, build_read_request,
-    build_write_request, service::CipService, ConnectionParams, TransportTrigger,
+    build_write_request, decode_extended_status, describe_extended_status, service::CipService,
+    ConnectionParams, TransportTrigger,
 };
 use ethernetip::types::{CipType, CipValue};
 
@@ -173,4 +174,21 @@ fn test_forward_open_custom_trigger() {
 fn test_transport_trigger_default() {
     let params = ConnectionParams::default();
     assert_eq!(params.trigger.to_byte(), 0xA3);
+}
+
+#[test]
+fn test_decode_extended_status() {
+    // Fake CIP response: general status OK, 2 extended words: 0x0205, 0x0315
+    let res = [
+        0x00, 0x00, 0x00, 0x02, // header: ext count = 2
+        0x05, 0x02, // 0x0205 = invalid RPI
+        0x15, 0x03, // 0x0315 = insufficient resources
+    ];
+
+    let ext = decode_extended_status(&res);
+    assert_eq!(ext, vec![0x0205, 0x0315]);
+
+    let desc = describe_extended_status(&ext).unwrap();
+    assert!(desc.contains("Invalid RPI"));
+    assert!(desc.contains("Insufficient resources"));
 }

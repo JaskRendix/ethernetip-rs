@@ -382,3 +382,46 @@ pub fn build_large_forward_close_request(slot: Option<u8>) -> Vec<u8> {
 
     cip
 }
+
+pub fn decode_extended_status(res: &[u8]) -> Vec<u16> {
+    if res.len() < 4 {
+        return Vec::new();
+    }
+
+    let count = res[3] as usize;
+    let mut out = Vec::with_capacity(count);
+
+    let mut pos = 4;
+    for _ in 0..count {
+        if pos + 1 >= res.len() {
+            break;
+        }
+        let word = u16::from_le_bytes([res[pos], res[pos + 1]]);
+        out.push(word);
+        pos += 2;
+    }
+
+    out
+}
+
+pub fn describe_extended_status(words: &[u16]) -> Option<String> {
+    if words.is_empty() {
+        return None;
+    }
+
+    let mut msgs = Vec::new();
+
+    for w in words {
+        let msg = match *w {
+            0x0100 => "Connection timeout",
+            0x0204 => "Invalid connection size",
+            0x0205 => "Invalid RPI",
+            0x0315 => "Insufficient resources",
+            0x0316 => "Unsupported transport trigger",
+            _ => return Some(format!("Extended status: 0x{:04X}", w)),
+        };
+        msgs.push(msg.to_string());
+    }
+
+    Some(msgs.join("; "))
+}
