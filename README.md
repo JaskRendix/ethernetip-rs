@@ -1,7 +1,7 @@
 # **ethernetip‑rs**
 
 A Rust implementation of the EtherNet/IP™ protocol for symbolic tag access on Allen‑Bradley ControlLogix and CompactLogix PLCs.  
-The library provides an async API for reading and writing CIP tags, including arrays, fragmented reads, and multi‑tag operations, with correct EPATH encoding and optional slot routing.
+The library provides an async API for reading and writing CIP tags, including typed accessors, arrays, fragmented reads, and multi‑tag operations, with correct EPATH encoding and optional slot routing.
 
 ---
 
@@ -15,8 +15,10 @@ A deterministic fake PLC is included for development and testing.
 
 ### Features
 
-- Read a single tag  
-- Write a single tag  
+- Typed tag access:
+  - `read_bool`, `read_sint`, `read_int`, `read_dint`, `read_real`, `read_string`
+  - `write_bool`, `write_sint`, `write_int`, `write_dint`, `write_real`, `write_string`
+- Raw tag access (`read_tag`, `write_tag`)
 - Read arrays  
   - unfragmented reads for small arrays  
   - CIP Fragmented Read (0x52) for large arrays  
@@ -38,17 +40,9 @@ A deterministic fake PLC is included for development and testing.
   - connection ID + sequence counter tracking
   - automatic routing of CIP requests over RR‑Data or Unit‑Data
 
-### Large Forward Open / Close
+---
 
-The library supports the extended connection services:
-
-- **Large Forward Open (0x5B)**
-- **Large Forward Close (0x5E)**
-
-These allow larger connection parameters (32‑bit) and higher O→T transfer sizes than the standard Forward Open.  
-The client automatically exposes both request builders and can be used in place of the standard connection setup when required by the controller.
-
-### Supported CIP types
+## Supported CIP types
 
 - BOOL (including packed BOOL arrays)
 - SINT
@@ -57,6 +51,9 @@ The client automatically exposes both request builders and can be used in place 
 - LINT
 - REAL
 - STRING
+
+Typed helpers automatically validate the returned CIP type and return  
+`CipError::TypeMismatch { expected, actual }` when the PLC tag type does not match.
 
 ---
 
@@ -67,8 +64,6 @@ ControlLogix systems require routing through the backplane:
 - CompactLogix: CPU is the Ethernet endpoint  
 - ControlLogix: CPU resides in a slot  
 
-Example:
-
 ```rust
 client.set_slot(2); // CPU in slot 2
 ```
@@ -77,23 +72,34 @@ Routing is applied across all read and write operations.
 
 ---
 
-## Basic usage
+## Basic usage (typed API)
 
 ```rust
 use ethernetip::EthernetIpClient;
-use ethernetip::types::CipValue;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut client = EthernetIpClient::connect("192.168.1.10").await?;
     client.set_slot(0);
 
-    let value = client.read_tag("MyTag").await?;
-    println!("Value: {:?}", value);
+    let running = client.read_bool("MotorRunning").await?;
+    let speed   = client.read_real("MotorSpeed").await?;
+    let count   = client.read_dint("Counter").await?;
 
-    client.write_tag("MyTag", CipValue::DInt(42)).await?;
+    client.write_dint("Setpoint", 120).await?;
+    client.write_bool("Enable", true).await?;
+
     Ok(())
 }
+```
+
+### Raw API (still available)
+
+```rust
+use ethernetip::types::CipValue;
+
+let value = client.read_tag("MyTag").await?;
+client.write_tag("MyTag", CipValue::DInt(42)).await?;
 ```
 
 ---
@@ -108,14 +114,11 @@ let values = client.read_tag_multi("MyArray", 10).await?;
 
 ### Large arrays (fragmented read)
 
-Logix controllers limit unfragmented reads to ~480 bytes.  
-`read_array()` performs CIP Fragmented Read (0x52) and reconstructs the full payload.
-
 ```rust
 let values = client.read_array("LargeArray", 2000).await?;
 ```
 
-The client handles:
+Handles:
 
 - type ID extraction  
 - partial transfer status (0x06)  
@@ -160,7 +163,7 @@ MSP batches multiple CIP requests into one round‑trip.
 
 ## Fake PLC for testing
 
-The test suite includes full coverage for CIP request builders, including Forward Open, Large Forward Open, and all EPATH variants.  
+The test suite includes full coverage for CIP request builders, including Forward Open, Large Forward Open, and all EPATH variants.
 
 ---
 
