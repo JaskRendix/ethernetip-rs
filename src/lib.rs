@@ -18,4 +18,4 @@ pub use client::{
     SymbolBrowsing, TagReadWrite,
 };
 
-pub use types::{CipType, CipValue, MultiResult};
+pub use types::{CipType, CipValue, IdentityInfo, MultiResult};

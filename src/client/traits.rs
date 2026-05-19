@@ -2,7 +2,7 @@ use std::io;
 
 use crate::cip::CipError;
 use crate::client::ForwardOpenError;
-use crate::types::{CipValue, SymbolInfo};
+use crate::types::{CipValue, IdentityInfo, SymbolInfo};
 use crate::MultiResult;
 
 pub trait ConnectionManagement {
@@ -70,6 +70,11 @@ pub trait TagReadWrite {
         self.read_object_attributes(0x01, 0x01).await
     }
 
+    async fn read_identity(&mut self) -> Result<IdentityInfo, CipError> {
+        let raw = self.read_identity_attributes().await?;
+        IdentityInfo::decode(&raw).map_err(|_| CipError::VendorSpecific(0xFC))
+    }
+
     async fn read_bool(&mut self, tag: &str) -> Result<bool, CipError>;
     async fn read_sint(&mut self, tag: &str) -> Result<i8, CipError>;
     async fn read_int(&mut self, tag: &str) -> Result<i16, CipError>;
@@ -107,4 +112,129 @@ pub trait MultipleServicePacket {
 #[async_trait::async_trait]
 pub trait SymbolBrowsing {
     async fn browse_symbols(&mut self) -> Result<Vec<SymbolInfo>, CipError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct StubIdentityClient {
+        raw_attributes: Vec<u8>,
+    }
+
+    #[async_trait::async_trait]
+    impl TagReadWrite for StubIdentityClient {
+        async fn read_tag(&mut self, _: &str) -> Result<CipValue, CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn write_tag(&mut self, _: &str, _: CipValue) -> Result<(), CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn read_tag_multi(&mut self, _: &str, _: usize) -> Result<Vec<CipValue>, CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn write_tag_multi(&mut self, _: &str, _: &[CipValue]) -> Result<(), CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn read_object_attribute(
+            &mut self,
+            _: u8,
+            _: u8,
+            _: u8,
+        ) -> Result<CipValue, CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn read_object_attributes(&mut self, _: u8, _: u8) -> Result<Vec<u8>, CipError> {
+            Ok(self.raw_attributes.clone())
+        }
+
+        async fn read_bool(&mut self, _: &str) -> Result<bool, CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn read_sint(&mut self, _: &str) -> Result<i8, CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn read_int(&mut self, _: &str) -> Result<i16, CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn read_dint(&mut self, _: &str) -> Result<i32, CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn read_real(&mut self, _: &str) -> Result<f32, CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn read_string(&mut self, _: &str) -> Result<String, CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn write_bool(&mut self, _: &str, _: bool) -> Result<(), CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn write_sint(&mut self, _: &str, _: i8) -> Result<(), CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn write_int(&mut self, _: &str, _: i16) -> Result<(), CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn write_dint(&mut self, _: &str, _: i32) -> Result<(), CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn write_real(&mut self, _: &str, _: f32) -> Result<(), CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+
+        async fn write_string(&mut self, _: &str, _: &str) -> Result<(), CipError> {
+            Err(CipError::VendorSpecific(0xFF))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_identity_default_impl() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&0x1234u16.to_le_bytes());
+        raw.extend_from_slice(&0x5678u16.to_le_bytes());
+        raw.extend_from_slice(&0x9ABCu16.to_le_bytes());
+        raw.extend_from_slice(&[0x01, 0x02]);
+        raw.extend_from_slice(&0x3344u16.to_le_bytes());
+        raw.extend_from_slice(&0x11223344u32.to_le_bytes());
+
+        let product_name = b"TestProduct";
+        raw.extend_from_slice(&(product_name.len() as u16).to_le_bytes());
+        raw.extend_from_slice(product_name);
+        raw.extend(std::iter::repeat_n(0, 82 - product_name.len()));
+
+        raw.push(0x05);
+
+        let mut client = StubIdentityClient {
+            raw_attributes: raw,
+        };
+        let identity = client
+            .read_identity()
+            .await
+            .expect("read_identity should succeed");
+
+        assert_eq!(identity.vendor_id, 0x1234);
+        assert_eq!(identity.device_type, 0x5678);
+        assert_eq!(identity.product_code, 0x9ABC);
+        assert_eq!(identity.revision_major, 0x01);
+        assert_eq!(identity.revision_minor, 0x02);
+        assert_eq!(identity.status, 0x3344);
+        assert_eq!(identity.serial_number, 0x11223344);
+        assert_eq!(identity.product_name, "TestProduct");
+        assert_eq!(identity.state, 0x05);
+    }
 }

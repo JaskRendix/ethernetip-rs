@@ -53,6 +53,87 @@ pub enum CipValue {
     Unit,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct IdentityInfo {
+    pub vendor_id: u16,
+    pub device_type: u16,
+    pub product_code: u16,
+    pub revision_major: u8,
+    pub revision_minor: u8,
+    pub status: u16,
+    pub serial_number: u32,
+    pub product_name: String,
+    pub state: u8,
+}
+
+impl IdentityInfo {
+    pub fn decode(data: &[u8]) -> Result<Self, &'static str> {
+        if data.len() < 2 + 2 + 2 + 2 + 2 + 4 + 2 + 1 {
+            return Err("not enough identity attribute data");
+        }
+
+        let mut pos = 0;
+
+        let vendor_id = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+
+        let device_type = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+
+        let product_code = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+
+        let revision_major = data[pos];
+        let revision_minor = data[pos + 1];
+        pos += 2;
+
+        let status = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+
+        let serial_number =
+            u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+        pos += 4;
+
+        if data.len() < pos + 2 {
+            return Err("identity product name too short");
+        }
+
+        let name_len = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
+        pos += 2;
+
+        if data.len() < pos + name_len {
+            return Err("identity product name length exceeds available data");
+        }
+
+        let product_name = String::from_utf8_lossy(&data[pos..pos + name_len]).into_owned();
+
+        let string_block_len = 82;
+        if data.len() >= pos + string_block_len {
+            pos += string_block_len;
+        } else {
+            pos += name_len;
+        }
+
+        if data.len() <= pos {
+            return Err("identity state missing");
+        }
+
+        let state = data[pos];
+
+        Ok(Self {
+            vendor_id,
+            device_type,
+            product_code,
+            revision_major,
+            revision_minor,
+            status,
+            serial_number,
+            product_name,
+            state,
+        })
+    }
+}
+
 impl CipValue {
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -84,4 +165,38 @@ pub struct SymbolInfo {
     pub name: String,
     pub typ: CipType,
     pub array_dims: Option<(u16, u16, u16)>, // up to 3D, unused dims = 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_identity_info_decode() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&0x1234u16.to_le_bytes());
+        raw.extend_from_slice(&0x5678u16.to_le_bytes());
+        raw.extend_from_slice(&0x9ABCu16.to_le_bytes());
+        raw.extend_from_slice(&[0x01, 0x02]);
+        raw.extend_from_slice(&0x3344u16.to_le_bytes());
+        raw.extend_from_slice(&0x11223344u32.to_le_bytes());
+
+        let product_name = b"TestProduct";
+        raw.extend_from_slice(&(product_name.len() as u16).to_le_bytes());
+        raw.extend_from_slice(product_name);
+        raw.extend(std::iter::repeat_n(0, 82 - product_name.len()));
+
+        raw.push(0x05);
+
+        let identity = IdentityInfo::decode(&raw).expect("decode should succeed");
+        assert_eq!(identity.vendor_id, 0x1234);
+        assert_eq!(identity.device_type, 0x5678);
+        assert_eq!(identity.product_code, 0x9ABC);
+        assert_eq!(identity.revision_major, 0x01);
+        assert_eq!(identity.revision_minor, 0x02);
+        assert_eq!(identity.status, 0x3344);
+        assert_eq!(identity.serial_number, 0x11223344);
+        assert_eq!(identity.product_name, "TestProduct");
+        assert_eq!(identity.state, 0x05);
+    }
 }
