@@ -49,6 +49,27 @@ pub trait TagReadWrite {
     async fn read_tag_multi(&mut self, tag: &str, count: usize) -> Result<Vec<CipValue>, CipError>;
     async fn write_tag_multi(&mut self, tag: &str, values: &[CipValue]) -> Result<(), CipError>;
 
+    async fn read_object_attribute(
+        &mut self,
+        class_id: u8,
+        instance_id: u8,
+        attribute_id: u8,
+    ) -> Result<CipValue, CipError>;
+
+    async fn read_object_attributes(
+        &mut self,
+        class_id: u8,
+        instance_id: u8,
+    ) -> Result<Vec<u8>, CipError>;
+
+    async fn read_identity_attribute(&mut self, attribute_id: u8) -> Result<CipValue, CipError> {
+        self.read_object_attribute(0x01, 0x01, attribute_id).await
+    }
+
+    async fn read_identity_attributes(&mut self) -> Result<Vec<u8>, CipError> {
+        self.read_object_attributes(0x01, 0x01).await
+    }
+
     async fn read_bool(&mut self, tag: &str) -> Result<bool, CipError>;
     async fn read_sint(&mut self, tag: &str) -> Result<i8, CipError>;
     async fn read_int(&mut self, tag: &str) -> Result<i16, CipError>;

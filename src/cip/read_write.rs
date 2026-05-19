@@ -163,6 +163,58 @@ pub fn build_read_fragmented_request(
     cip
 }
 
+fn encode_object_path(class_id: u8, instance_id: u8, slot: Option<u8>) -> Vec<u8> {
+    let mut segments = Vec::new();
+
+    if let Some(slot) = slot {
+        segments.extend_from_slice(&[0x01, slot, 0x00, 0x00]);
+    }
+
+    segments.extend_from_slice(&[0x20, class_id, 0x24, instance_id]);
+
+    let word_count = (segments.len() / 2) as u8;
+    let mut out = Vec::with_capacity(1 + segments.len());
+    out.push(word_count);
+    out.extend_from_slice(&segments);
+    out
+}
+
+fn encode_object_attribute_path(
+    class_id: u8,
+    instance_id: u8,
+    attribute_id: u8,
+    slot: Option<u8>,
+) -> Vec<u8> {
+    let mut path = encode_object_path(class_id, instance_id, slot);
+    path.extend_from_slice(&[0x30, attribute_id]);
+    let word_count = ((path.len() - 1) / 2) as u8;
+    path[0] = word_count;
+    path
+}
+
+pub fn build_get_attribute_single_request(
+    class_id: u8,
+    instance_id: u8,
+    attribute_id: u8,
+    slot: Option<u8>,
+) -> Vec<u8> {
+    let path = encode_object_attribute_path(class_id, instance_id, attribute_id, slot);
+
+    let mut cip = Vec::with_capacity(1 + path.len());
+    cip.push(CipService::GetAttributeSingle as u8);
+    cip.extend_from_slice(&path);
+    cip
+}
+
+pub fn build_get_attribute_all_request(class_id: u8, instance_id: u8, slot: Option<u8>) -> Vec<u8> {
+    let path = encode_object_path(class_id, instance_id, slot);
+
+    let mut cip = Vec::with_capacity(1 + path.len());
+    cip.push(CipService::GetAttributeAll as u8);
+    cip.extend_from_slice(&path);
+    cip
+}
+
 fn encode_connection_manager_path(slot: Option<u8>) -> Vec<u8> {
     let mut segments = Vec::new();
 

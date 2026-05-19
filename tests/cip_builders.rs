@@ -1,5 +1,6 @@
 use ethernetip::cip::{
-    build_forward_close_request, build_forward_open_request, build_large_forward_close_request,
+    build_forward_close_request, build_forward_open_request, build_get_attribute_all_request,
+    build_get_attribute_single_request, build_large_forward_close_request,
     build_large_forward_open_request, build_read_fragmented_request, build_read_request,
     build_write_request, decode_extended_status, describe_extended_status, map_extended_status,
     service::CipService, ConnectionParams, ForwardOpenError, TransportTrigger,
@@ -60,6 +61,52 @@ fn test_build_read_fragmented_request() {
         cip[epath_end + 5],
     ]);
     assert_eq!(offset, 200);
+}
+
+#[test]
+fn test_build_get_attribute_single_request() {
+    let cip = build_get_attribute_single_request(0x06, 0x01, 0x03, None);
+    assert_eq!(cip[0], CipService::GetAttributeSingle as u8);
+    assert_eq!(cip[1], 3); // word count for class+instance+attribute
+    assert_eq!(cip[2], 0x20);
+    assert_eq!(cip[3], 0x06);
+    assert_eq!(cip[4], 0x24);
+    assert_eq!(cip[5], 0x01);
+    assert_eq!(cip[6], 0x30);
+    assert_eq!(cip[7], 0x03);
+}
+
+#[test]
+fn test_build_get_attribute_single_request_slot() {
+    let cip = build_get_attribute_single_request(0x06, 0x01, 0x03, Some(2));
+    assert_eq!(cip[0], CipService::GetAttributeSingle as u8);
+    assert_eq!(cip[1], 5); // word count for port segment + object path
+    assert_eq!(cip[2], 0x01);
+    assert_eq!(cip[3], 2);
+    assert_eq!(cip[6], 0x20);
+    assert_eq!(cip[7], 0x06);
+}
+
+#[test]
+fn test_build_get_attribute_all_request() {
+    let cip = build_get_attribute_all_request(0x02, 0x01, None);
+    assert_eq!(cip[0], CipService::GetAttributeAll as u8);
+    assert_eq!(cip[1], 2); // word count for class + instance
+    assert_eq!(cip[2], 0x20);
+    assert_eq!(cip[3], 0x02);
+    assert_eq!(cip[4], 0x24);
+    assert_eq!(cip[5], 0x01);
+}
+
+#[test]
+fn test_build_get_attribute_all_request_slot() {
+    let cip = build_get_attribute_all_request(0x02, 0x01, Some(3));
+    assert_eq!(cip[0], CipService::GetAttributeAll as u8);
+    assert_eq!(cip[1], 4); // word count for port segment + class + instance
+    assert_eq!(cip[2], 0x01);
+    assert_eq!(cip[3], 3);
+    assert_eq!(cip[6], 0x20);
+    assert_eq!(cip[7], 0x02);
 }
 
 #[test]

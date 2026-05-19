@@ -1,7 +1,8 @@
 use std::io;
 
 use crate::cip::{
-    build_read_request, build_write_request, decode_cip_response, decode_write_response, CipError,
+    build_get_attribute_all_request, build_get_attribute_single_request, build_read_request,
+    build_write_request, decode_cip_response, decode_write_response, CipError,
 };
 use crate::client::{ConnectedMessaging, TagReadWrite, UnconnectedMessaging};
 use crate::types::CipValue;
@@ -20,23 +21,9 @@ impl TagReadWrite for EthernetIpClient {
         };
 
         let res = res.map_err(|_| CipError::VendorSpecific(0xFF))?;
+        let payload = parse_cip_response_payload(&res)?;
 
-        if res.len() < 4 {
-            return Err(CipError::VendorSpecific(0xFE));
-        }
-
-        let general_status = res[2];
-        if general_status != 0 {
-            return Err(CipError::from(general_status));
-        }
-
-        let ext_words = res[3] as usize;
-        let data_start = 4 + ext_words * 2;
-        if res.len() < data_start {
-            return Err(CipError::VendorSpecific(0xFD));
-        }
-
-        decode_cip_response(&res[data_start..]).ok_or(CipError::VendorSpecific(0xFC))
+        decode_cip_response(payload).ok_or(CipError::VendorSpecific(0xFC))
     }
 
     async fn write_tag(&mut self, tag: &str, value: CipValue) -> Result<(), CipError> {
@@ -66,27 +53,56 @@ impl TagReadWrite for EthernetIpClient {
         };
 
         let res = res.map_err(|_| CipError::VendorSpecific(0xFF))?;
+        let payload = parse_cip_response_payload(&res)?;
 
-        if res.len() < 4 {
-            return Err(CipError::VendorSpecific(0xFE));
-        }
-
-        let general_status = res[2];
-        if general_status != 0 {
-            return Err(CipError::from(general_status));
-        }
-
-        let ext_words = res[3] as usize;
-        let data_start = 4 + ext_words * 2;
-
-        if res.len() < data_start + 2 {
+        if payload.len() < 2 {
             return Err(CipError::VendorSpecific(0xFD));
         }
 
-        let type_id = u16::from_le_bytes([res[data_start], res[data_start + 1]]);
-        let payload = &res[data_start + 2..];
+        let type_id = u16::from_le_bytes([payload[0], payload[1]]);
+        let payload = &payload[2..];
 
         Ok(crate::cip::decode_cip_data_list(type_id, payload))
+    }
+
+    async fn read_object_attribute(
+        &mut self,
+        class_id: u8,
+        instance_id: u8,
+        attribute_id: u8,
+    ) -> Result<CipValue, CipError> {
+        let cip =
+            build_get_attribute_single_request(class_id, instance_id, attribute_id, self.slot);
+
+        let res: io::Result<Vec<u8>> = if self.connected {
+            self.send_unit_data(cip).await
+        } else {
+            self.send_rr_data(cip).await
+        };
+
+        let res = res.map_err(|_| CipError::VendorSpecific(0xFF))?;
+        let payload = parse_cip_response_payload(&res)?;
+
+        decode_cip_response(payload).ok_or(CipError::VendorSpecific(0xFC))
+    }
+
+    async fn read_object_attributes(
+        &mut self,
+        class_id: u8,
+        instance_id: u8,
+    ) -> Result<Vec<u8>, CipError> {
+        let cip = build_get_attribute_all_request(class_id, instance_id, self.slot);
+
+        let res: io::Result<Vec<u8>> = if self.connected {
+            self.send_unit_data(cip).await
+        } else {
+            self.send_rr_data(cip).await
+        };
+
+        let res = res.map_err(|_| CipError::VendorSpecific(0xFF))?;
+        let payload = parse_cip_response_payload(&res)?;
+
+        Ok(payload.to_vec())
     }
 
     async fn write_tag_multi(&mut self, tag: &str, values: &[CipValue]) -> Result<(), CipError> {
@@ -181,4 +197,23 @@ impl TagReadWrite for EthernetIpClient {
         self.write_tag(tag, CipValue::String(value.to_string()))
             .await
     }
+}
+
+fn parse_cip_response_payload(res: &[u8]) -> Result<&[u8], CipError> {
+    if res.len() < 4 {
+        return Err(CipError::VendorSpecific(0xFE));
+    }
+
+    let general_status = res[2];
+    if general_status != 0 {
+        return Err(CipError::from(general_status));
+    }
+
+    let ext_words = res[3] as usize;
+    let data_start = 4 + ext_words * 2;
+    if res.len() < data_start {
+        return Err(CipError::VendorSpecific(0xFD));
+    }
+
+    Ok(&res[data_start..])
 }
