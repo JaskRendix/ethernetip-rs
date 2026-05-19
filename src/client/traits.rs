@@ -2,7 +2,7 @@ use std::io;
 
 use crate::cip::CipError;
 use crate::client::ForwardOpenError;
-use crate::types::{CipValue, IdentityInfo, SymbolInfo};
+use crate::types::{CipValue, ConnectionManagerInfo, IdentityInfo, SymbolInfo};
 use crate::MultiResult;
 
 pub trait ConnectionManagement {
@@ -73,6 +73,22 @@ pub trait TagReadWrite {
     async fn read_identity(&mut self) -> Result<IdentityInfo, CipError> {
         let raw = self.read_identity_attributes().await?;
         IdentityInfo::decode(&raw).map_err(|_| CipError::VendorSpecific(0xFC))
+    }
+
+    async fn read_connection_manager_attribute(
+        &mut self,
+        attribute_id: u8,
+    ) -> Result<CipValue, CipError> {
+        self.read_object_attribute(0x06, 0x01, attribute_id).await
+    }
+
+    async fn read_connection_manager_attributes(&mut self) -> Result<Vec<u8>, CipError> {
+        self.read_object_attributes(0x06, 0x01).await
+    }
+
+    async fn read_connection_manager(&mut self) -> Result<ConnectionManagerInfo, CipError> {
+        let raw = self.read_connection_manager_attributes().await?;
+        ConnectionManagerInfo::decode(&raw).map_err(|_| CipError::VendorSpecific(0xFC))
     }
 
     async fn read_bool(&mut self, tag: &str) -> Result<bool, CipError>;
@@ -236,5 +252,25 @@ mod tests {
         assert_eq!(identity.serial_number, 0x11223344);
         assert_eq!(identity.product_name, "TestProduct");
         assert_eq!(identity.state, 0x05);
+    }
+
+    #[tokio::test]
+    async fn test_read_connection_manager_default_impl() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&0x0102u16.to_le_bytes());
+        raw.extend_from_slice(&0x0304u16.to_le_bytes());
+        raw.extend_from_slice(&0x0506u16.to_le_bytes());
+
+        let mut client = StubIdentityClient {
+            raw_attributes: raw,
+        };
+        let info = client
+            .read_connection_manager()
+            .await
+            .expect("read_connection_manager should succeed");
+
+        assert_eq!(info.revision, 0x0102);
+        assert_eq!(info.status, 0x0304);
+        assert_eq!(info.configuration_capability, 0x0506);
     }
 }

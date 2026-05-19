@@ -134,6 +134,31 @@ impl IdentityInfo {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectionManagerInfo {
+    pub revision: u16,
+    pub status: u16,
+    pub configuration_capability: u16,
+}
+
+impl ConnectionManagerInfo {
+    pub fn decode(data: &[u8]) -> Result<Self, &'static str> {
+        if data.len() < 6 {
+            return Err("not enough connection manager attribute data");
+        }
+
+        let revision = u16::from_le_bytes([data[0], data[1]]);
+        let status = u16::from_le_bytes([data[2], data[3]]);
+        let configuration_capability = u16::from_le_bytes([data[4], data[5]]);
+
+        Ok(Self {
+            revision,
+            status,
+            configuration_capability,
+        })
+    }
+}
+
 impl CipValue {
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -198,5 +223,18 @@ mod tests {
         assert_eq!(identity.serial_number, 0x11223344);
         assert_eq!(identity.product_name, "TestProduct");
         assert_eq!(identity.state, 0x05);
+    }
+
+    #[test]
+    fn test_connection_manager_info_decode() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&0x0102u16.to_le_bytes());
+        raw.extend_from_slice(&0x0304u16.to_le_bytes());
+        raw.extend_from_slice(&0x0506u16.to_le_bytes());
+
+        let info = ConnectionManagerInfo::decode(&raw).expect("decode should succeed");
+        assert_eq!(info.revision, 0x0102);
+        assert_eq!(info.status, 0x0304);
+        assert_eq!(info.configuration_capability, 0x0506);
     }
 }
