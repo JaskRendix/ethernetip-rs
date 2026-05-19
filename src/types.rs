@@ -53,6 +53,22 @@ pub enum CipValue {
     Unit,
 }
 
+impl CipValue {
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            CipValue::Bool(_) => "BOOL",
+            CipValue::SInt(_) => "SINT",
+            CipValue::Int(_) => "INT",
+            CipValue::DInt(_) => "DINT",
+            CipValue::LInt(_) => "LINT",
+            CipValue::Real(_) => "REAL",
+            CipValue::String(_) => "STRING",
+            CipValue::BoolPacked(_) => "BOOL_PACKED",
+            CipValue::Unit => "UNIT",
+        }
+    }
+}
+
 /// Result type used by CIP Multiple Service Packet (MSP) responses.
 ///
 /// - `Ok(T)` contains a successfully decoded CIP value.

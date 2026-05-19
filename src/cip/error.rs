@@ -8,6 +8,10 @@ pub enum CipError {
     PathSegmentError,
     PathDestinationUnknown,
     VendorSpecific(u8),
+    TypeMismatch {
+        expected: &'static str,
+        actual: &'static str,
+    },
 }
 
 impl From<u8> for CipError {
@@ -37,6 +41,10 @@ impl fmt::Display for CipError {
             CipError::PathDestinationUnknown => write!(f, "Path destination unknown (0x06)"),
 
             CipError::VendorSpecific(code) => write!(f, "Vendor-specific CIP error 0x{:02X}", code),
+
+            CipError::TypeMismatch { expected, actual } => {
+                write!(f, "Type mismatch: expected {expected}, got {actual}")
+            }
         }
     }
 }

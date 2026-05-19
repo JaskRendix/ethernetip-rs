@@ -661,4 +661,89 @@ impl EthernetIpClient {
 
         Ok(())
     }
+
+    pub async fn read_dint(&mut self, tag: &str) -> Result<i32, CipError> {
+        match self.read_tag(tag).await? {
+            CipValue::DInt(v) => Ok(v),
+            other => Err(CipError::TypeMismatch {
+                expected: "DINT",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub async fn read_bool(&mut self, tag: &str) -> Result<bool, CipError> {
+        match self.read_tag(tag).await? {
+            CipValue::Bool(v) => Ok(v),
+            other => Err(CipError::TypeMismatch {
+                expected: "BOOL",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub async fn read_real(&mut self, tag: &str) -> Result<f32, CipError> {
+        match self.read_tag(tag).await? {
+            CipValue::Real(v) => Ok(v),
+            other => Err(CipError::TypeMismatch {
+                expected: "REAL",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub async fn read_string(&mut self, tag: &str) -> Result<String, CipError> {
+        match self.read_tag(tag).await? {
+            CipValue::String(s) => Ok(s),
+            other => Err(CipError::TypeMismatch {
+                expected: "STRING",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub async fn write_dint(&mut self, tag: &str, value: i32) -> Result<(), CipError> {
+        self.write_tag(tag, CipValue::DInt(value)).await
+    }
+
+    pub async fn read_int(&mut self, tag: &str) -> Result<i16, CipError> {
+        match self.read_tag(tag).await? {
+            CipValue::Int(v) => Ok(v),
+            other => Err(CipError::TypeMismatch {
+                expected: "INT",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub async fn read_sint(&mut self, tag: &str) -> Result<i8, CipError> {
+        match self.read_tag(tag).await? {
+            CipValue::SInt(v) => Ok(v),
+            other => Err(CipError::TypeMismatch {
+                expected: "SINT",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub async fn write_bool(&mut self, tag: &str, value: bool) -> Result<(), CipError> {
+        self.write_tag(tag, CipValue::Bool(value)).await
+    }
+
+    pub async fn write_real(&mut self, tag: &str, value: f32) -> Result<(), CipError> {
+        self.write_tag(tag, CipValue::Real(value)).await
+    }
+
+    pub async fn write_string(&mut self, tag: &str, value: &str) -> Result<(), CipError> {
+        self.write_tag(tag, CipValue::String(value.to_string()))
+            .await
+    }
+
+    pub async fn write_int(&mut self, tag: &str, value: i16) -> Result<(), CipError> {
+        self.write_tag(tag, CipValue::Int(value)).await
+    }
+
+    pub async fn write_sint(&mut self, tag: &str, value: i8) -> Result<(), CipError> {
+        self.write_tag(tag, CipValue::SInt(value)).await
+    }
 }
