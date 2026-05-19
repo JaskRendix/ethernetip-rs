@@ -3,18 +3,37 @@ use crate::cip::service::CipService;
 use crate::types::{CipType, CipValue};
 
 #[derive(Clone, Copy, Debug)]
+pub enum TransportTrigger {
+    Class3ClientInitiated, // 0xA3 (what you use today)
+                           // extend later if you want more:
+                           // Cyclic,
+                           // ChangeOfState,
+                           // ApplicationObject,
+}
+
+impl TransportTrigger {
+    pub fn to_byte(self) -> u8 {
+        match self {
+            TransportTrigger::Class3ClientInitiated => 0xA3,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct ConnectionParams {
-    pub rpi: u32,         // microseconds
-    pub o_to_t_size: u16, // bytes
-    pub t_to_o_size: u16, // bytes
+    pub rpi: u32,
+    pub o_to_t_size: u16,
+    pub t_to_o_size: u16,
+    pub trigger: TransportTrigger,
 }
 
 impl Default for ConnectionParams {
     fn default() -> Self {
         Self {
-            rpi: 100_000,     // 100 ms
-            o_to_t_size: 500, // bytes
-            t_to_o_size: 0,   // unused for explicit messaging
+            rpi: 100_000,
+            o_to_t_size: 500,
+            t_to_o_size: 0,
+            trigger: TransportTrigger::Class3ClientInitiated,
         }
     }
 }
@@ -192,7 +211,7 @@ pub fn build_forward_open_request(slot: Option<u8>, params: ConnectionParams) ->
     cip.extend_from_slice(&t_to_o_params.to_le_bytes());
 
     // Transport class trigger: Class 3, client‑initiated, application trigger
-    cip.push(0xA3);
+    cip.push(params.trigger.to_byte());
 
     // Connection path size (in words) and path:
     // For explicit messaging to the CPU: port 1 backplane, slot, class 0x02 (Message Router), instance 0x01
@@ -302,7 +321,7 @@ pub fn build_large_forward_open_request(slot: Option<u8>, params: ConnectionPara
     cip.extend_from_slice(&0u32.to_le_bytes());
 
     // Transport class trigger
-    cip.push(0xA3);
+    cip.push(params.trigger.to_byte());
 
     // Connection path
     let mut conn_path_segments = Vec::new();

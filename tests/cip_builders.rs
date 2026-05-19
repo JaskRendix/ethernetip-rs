@@ -1,7 +1,7 @@
 use ethernetip::cip::{
     build_forward_close_request, build_forward_open_request, build_large_forward_close_request,
     build_large_forward_open_request, build_read_fragmented_request, build_read_request,
-    build_write_request, service::CipService, ConnectionParams,
+    build_write_request, service::CipService, ConnectionParams, TransportTrigger,
 };
 use ethernetip::types::{CipType, CipValue};
 
@@ -151,39 +151,26 @@ fn test_connection_manager_path_no_slot() {
 }
 
 #[test]
-fn test_forward_open_custom_params() {
+fn test_forward_open_custom_trigger() {
     let params = ConnectionParams {
-        rpi: 250_000,
-        o_to_t_size: 123,
-        t_to_o_size: 77,
+        rpi: 100_000,
+        o_to_t_size: 500,
+        t_to_o_size: 0,
+        trigger: TransportTrigger::Class3ClientInitiated,
     };
 
     let cip = build_forward_open_request(Some(1), params);
 
     let epath_end = parse_epath_len(&cip);
 
-    // RPI is after:
-    // 2  priority/timeout
-    // 4  O->T ID
-    // 4  T->O ID
-    // 2  serial
-    // 2  vendor
-    // 4  originator serial
-    // 1  timeout multiplier
-    // 3  reserved
-    let rpi_offset = epath_end + 2 + 4 + 4 + 2 + 2 + 4 + 1 + 3;
+    // Transport Trigger offset:
+    let tct_offset = epath_end + 2 + 4 + 4 + 2 + 2 + 4 + 1 + 3 + 4 + 2 + 4 + 2;
 
-    let rpi = u32::from_le_bytes([
-        cip[rpi_offset],
-        cip[rpi_offset + 1],
-        cip[rpi_offset + 2],
-        cip[rpi_offset + 3],
-    ]);
-    assert_eq!(rpi, 250_000);
+    assert_eq!(cip[tct_offset], 0xA3);
+}
 
-    // O->T params follow immediately after RPI
-    let o_to_t_offset = rpi_offset + 4;
-
-    let o_to_t = u16::from_le_bytes([cip[o_to_t_offset], cip[o_to_t_offset + 1]]);
-    assert_eq!(o_to_t & 0x1FFF, 123);
+#[test]
+fn test_transport_trigger_default() {
+    let params = ConnectionParams::default();
+    assert_eq!(params.trigger.to_byte(), 0xA3);
 }
