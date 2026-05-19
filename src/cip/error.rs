@@ -23,9 +23,21 @@ impl From<u8> for CipError {
     }
 }
 
-impl std::fmt::Display for CipError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+impl fmt::Display for CipError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CipError::ConnectionFailure => write!(f, "Connection failure (0x01)"),
+
+            CipError::ResourceUnavailable => write!(f, "Resource unavailable (0x02)"),
+
+            CipError::InvalidAttribute => write!(f, "Invalid attribute (0x04)"),
+
+            CipError::PathSegmentError => write!(f, "Path segment error (0x05)"),
+
+            CipError::PathDestinationUnknown => write!(f, "Path destination unknown (0x06)"),
+
+            CipError::VendorSpecific(code) => write!(f, "Vendor-specific CIP error 0x{:02X}", code),
+        }
     }
 }
 
