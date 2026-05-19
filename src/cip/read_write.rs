@@ -2,6 +2,23 @@ use crate::cip::epath::encode_epath_with_slot;
 use crate::cip::service::CipService;
 use crate::types::{CipType, CipValue};
 
+#[derive(Clone, Copy, Debug)]
+pub struct ConnectionParams {
+    pub rpi: u32,         // microseconds
+    pub o_to_t_size: u16, // bytes
+    pub t_to_o_size: u16, // bytes
+}
+
+impl Default for ConnectionParams {
+    fn default() -> Self {
+        Self {
+            rpi: 100_000,     // 100 ms
+            o_to_t_size: 500, // bytes
+            t_to_o_size: 0,   // unused for explicit messaging
+        }
+    }
+}
+
 pub fn build_read_request(tag: &str, slot: Option<u8>) -> Vec<u8> {
     let epath = encode_epath_with_slot(tag, slot);
 
@@ -132,7 +149,7 @@ fn encode_connection_manager_path(slot: Option<u8>) -> Vec<u8> {
     out
 }
 
-pub fn build_forward_open_request(slot: Option<u8>) -> Vec<u8> {
+pub fn build_forward_open_request(slot: Option<u8>, params: ConnectionParams) -> Vec<u8> {
     let path = encode_connection_manager_path(slot);
 
     let mut cip = Vec::new();
@@ -164,19 +181,15 @@ pub fn build_forward_open_request(slot: Option<u8>) -> Vec<u8> {
     // Reserved (3 bytes)
     cip.extend_from_slice(&[0x00, 0x00, 0x00]);
 
-    // O->T RPI (100 ms, in microseconds)
-    cip.extend_from_slice(&100_000u32.to_le_bytes());
+    cip.extend_from_slice(&params.rpi.to_le_bytes());
 
-    // O->T connection parameters:
-    //  - point‑to‑point, variable length, 500 bytes max
-    let o_to_t_params: u16 = 0x4000 | 500;
+    let o_to_t_params: u16 = 0x4000 | params.o_to_t_size;
     cip.extend_from_slice(&o_to_t_params.to_le_bytes());
 
-    // T->O RPI (not used)
-    cip.extend_from_slice(&0u32.to_le_bytes());
+    cip.extend_from_slice(&params.rpi.to_le_bytes()); // or 0 for explicit messaging
 
-    // T->O connection parameters (not used)
-    cip.extend_from_slice(&0u16.to_le_bytes());
+    let t_to_o_params: u16 = 0x4000 | params.t_to_o_size;
+    cip.extend_from_slice(&t_to_o_params.to_le_bytes());
 
     // Transport class trigger: Class 3, client‑initiated, application trigger
     cip.push(0xA3);
@@ -242,7 +255,7 @@ pub fn build_forward_close_request(slot: Option<u8>) -> Vec<u8> {
     cip
 }
 
-pub fn build_large_forward_open_request(slot: Option<u8>) -> Vec<u8> {
+pub fn build_large_forward_open_request(slot: Option<u8>, params: ConnectionParams) -> Vec<u8> {
     let path = encode_connection_manager_path(slot);
 
     let mut cip = Vec::new();
@@ -275,11 +288,11 @@ pub fn build_large_forward_open_request(slot: Option<u8>) -> Vec<u8> {
     cip.extend_from_slice(&[0, 0, 0]);
 
     // O->T RPI (100 ms)
-    cip.extend_from_slice(&100_000u32.to_le_bytes());
+    cip.extend_from_slice(&params.rpi.to_le_bytes());
 
     // O->T connection parameters (32‑bit)
     // Example: variable length, 2000 bytes max
-    let o_to_t_params: u32 = 0x4000_0000 | 2000;
+    let o_to_t_params: u32 = 0x4000_0000 | params.o_to_t_size as u32;
     cip.extend_from_slice(&o_to_t_params.to_le_bytes());
 
     // T->O RPI

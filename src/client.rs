@@ -28,6 +28,7 @@ pub struct EthernetIpClient {
     retries: usize,
     ip: String,
     connected: bool,
+    connection_params: ConnectionParams,
 }
 
 impl EthernetIpClient {
@@ -115,6 +116,7 @@ impl EthernetIpClient {
             retries: 3,
             ip: ip.to_string(),
             connected: false,
+            connection_params: ConnectionParams::default(),
         })
     }
 
@@ -135,6 +137,10 @@ impl EthernetIpClient {
 
     pub async fn try_send_unit_data(&mut self, cip: Vec<u8>) -> io::Result<Vec<u8>> {
         self.send_unit_data(cip).await
+    }
+
+    pub fn set_connection_params(&mut self, params: ConnectionParams) {
+        self.connection_params = params;
     }
 
     pub fn parse_cpf(data: &[u8]) -> io::Result<&[u8]> {
@@ -469,7 +475,7 @@ impl EthernetIpClient {
     }
 
     pub async fn forward_open(&mut self) -> io::Result<()> {
-        let cip = build_forward_open_request(self.slot);
+        let cip = build_forward_open_request(self.slot, self.connection_params);
 
         let res = if self.connected {
             self.send_unit_data(cip).await?
@@ -549,7 +555,7 @@ impl EthernetIpClient {
     }
 
     pub async fn large_forward_open(&mut self) -> io::Result<()> {
-        let cip = build_large_forward_open_request(self.slot);
+        let cip = build_large_forward_open_request(self.slot, self.connection_params);
 
         let res = if self.connected {
             self.send_unit_data(cip).await?
@@ -579,21 +585,28 @@ impl EthernetIpClient {
 
     pub async fn forward_open_with_fallback(&mut self) -> io::Result<()> {
         // 1) Try Large Forward Open first
-        match self.large_forward_open().await {
+        let res = {
+            let cip = build_large_forward_open_request(self.slot, self.connection_params);
+            if self.connected {
+                self.send_unit_data(cip).await
+            } else {
+                self.send_rr_data(cip).await
+            }
+        };
+
+        match res {
             Ok(_) => return Ok(()),
 
             Err(e) => {
-                // Extract CIP general status if possible
                 let msg = e.to_string();
 
                 // If the PLC explicitly rejected the service, fall back
                 let should_fallback = msg.contains("0x01") || // Connection failure
-                msg.contains("0x20") || // Invalid parameter
-                msg.contains("0x26") || // Unsupported service
-                msg.contains("0x05"); // Path destination unknown
+                                    msg.contains("0x20") || // Invalid parameter
+                                    msg.contains("0x26") || // Unsupported service
+                                    msg.contains("0x05"); // Path destination unknown
 
                 if !should_fallback {
-                    // Unexpected error → do NOT fallback
                     return Err(e);
                 }
             }
