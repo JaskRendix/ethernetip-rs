@@ -54,6 +54,19 @@ pub enum CipValue {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DiscoveredIdentity {
+    pub ip: String,
+    pub vendor_id: u16,
+    pub device_type: u16,
+    pub product_code: u16,
+    pub revision_major: u8,
+    pub revision_minor: u8,
+    pub status: u16,
+    pub serial: u32,
+    pub product_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct IdentityInfo {
     pub vendor_id: u16,
     pub device_type: u16,

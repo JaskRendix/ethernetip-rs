@@ -2,7 +2,7 @@ use std::io;
 
 use crate::cip::CipError;
 use crate::client::ForwardOpenError;
-use crate::types::{CipValue, ConnectionManagerInfo, IdentityInfo, SymbolInfo};
+use crate::types::{CipValue, ConnectionManagerInfo, DiscoveredIdentity, IdentityInfo, SymbolInfo};
 use crate::MultiResult;
 
 pub trait ConnectionManagement {
@@ -23,7 +23,7 @@ pub trait Connectable: Sized {
 
 #[async_trait::async_trait]
 pub trait Discovery {
-    async fn discover() -> io::Result<Vec<(String, String)>>;
+    async fn discover() -> io::Result<Vec<DiscoveredIdentity>>;
 }
 
 #[async_trait::async_trait]
