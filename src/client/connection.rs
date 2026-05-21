@@ -7,37 +7,47 @@ use tokio::net::TcpStream;
 
 use super::{Connectable, ConnectionManagement, EthernetIpClient};
 
+/// Shared helper for connect() and reconnect().
+async fn open_session(ip: &str) -> io::Result<(TcpStream, u32)> {
+    let mut stream = TcpStream::connect(format!("{ip}:44818")).await?;
+
+    // Build RegisterSession packet
+    let mut reg = EncapsulationHeader::new(COMMAND_REGISTER_SESSION, 4, 0)
+        .to_bytes()
+        .to_vec();
+    reg.extend_from_slice(&1u16.to_le_bytes());
+    reg.extend_from_slice(&0u16.to_le_bytes());
+
+    stream.write_all(&reg).await?;
+
+    // Read 24‑byte header
+    let mut h_buf = [0u8; 24];
+    stream.read_exact(&mut h_buf).await?;
+    let hdr = EncapsulationHeader::from_bytes(&h_buf)
+        .ok_or(io::Error::other("Handshake failed: invalid header"))?;
+
+    if hdr.status != 0 {
+        return Err(io::Error::other(format!(
+            "RegisterSession failed with status 0x{:04X}",
+            hdr.status
+        )));
+    }
+
+    // Read protocol version + options
+    let mut s_buf = [0u8; 4];
+    stream.read_exact(&mut s_buf).await?;
+
+    Ok((stream, hdr.session))
+}
+
 #[async_trait::async_trait]
 impl Connectable for EthernetIpClient {
     async fn connect(ip: &str) -> io::Result<Self> {
-        let mut stream = TcpStream::connect(format!("{ip}:44818")).await?;
-
-        let mut reg = EncapsulationHeader::new(COMMAND_REGISTER_SESSION, 4, 0)
-            .to_bytes()
-            .to_vec();
-        reg.extend_from_slice(&1u16.to_le_bytes());
-        reg.extend_from_slice(&0u16.to_le_bytes());
-
-        stream.write_all(&reg).await?;
-
-        let mut h_buf = [0u8; 24];
-        stream.read_exact(&mut h_buf).await?;
-        let hdr = EncapsulationHeader::from_bytes(&h_buf)
-            .ok_or(io::Error::other("Handshake failed: invalid header"))?;
-
-        if hdr.status != 0 {
-            return Err(io::Error::other(format!(
-                "RegisterSession failed with status 0x{:04X}",
-                hdr.status
-            )));
-        }
-
-        let mut s_buf = [0u8; 4];
-        stream.read_exact(&mut s_buf).await?;
+        let (stream, session) = open_session(ip).await?;
 
         Ok(Self {
             stream,
-            session: hdr.session,
+            session,
             slot: None,
             connection_id: None,
             sequence: 1,
@@ -82,33 +92,9 @@ impl ConnectionManagement for EthernetIpClient {
 
 impl EthernetIpClient {
     pub(crate) async fn reconnect(&mut self) -> io::Result<()> {
-        let mut stream = TcpStream::connect(format!("{}:44818", self.ip)).await?;
-
-        let mut reg = EncapsulationHeader::new(COMMAND_REGISTER_SESSION, 4, 0)
-            .to_bytes()
-            .to_vec();
-        reg.extend_from_slice(&1u16.to_le_bytes());
-        reg.extend_from_slice(&0u16.to_le_bytes());
-
-        stream.write_all(&reg).await?;
-
-        let mut h_buf = [0u8; 24];
-        stream.read_exact(&mut h_buf).await?;
-        let hdr = EncapsulationHeader::from_bytes(&h_buf)
-            .ok_or(io::Error::other("Handshake failed: invalid header"))?;
-
-        if hdr.status != 0 {
-            return Err(io::Error::other(format!(
-                "RegisterSession failed with status 0x{:04X}",
-                hdr.status
-            )));
-        }
-
-        let mut s_buf = [0u8; 4];
-        stream.read_exact(&mut s_buf).await?;
-
+        let (stream, session) = open_session(&self.ip).await?;
         self.stream = stream;
-        self.session = hdr.session;
+        self.session = session;
         Ok(())
     }
 }
