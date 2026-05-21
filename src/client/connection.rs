@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::client::ConnectionParams;
+use crate::cip::ConnectionParams;
 use crate::encapsulation::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;

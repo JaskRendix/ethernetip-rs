@@ -3,7 +3,7 @@ use ethernetip::cip::{
     build_get_attribute_single_request, build_large_forward_close_request,
     build_large_forward_open_request, build_read_fragmented_request, build_read_request,
     build_write_request, decode_extended_status, describe_extended_status, map_extended_status,
-    service::CipService, ConnectionParams, ForwardOpenError, TransportTrigger,
+    service::CipService, ConnectionIds, ConnectionParams, ForwardOpenError, TransportTrigger,
 };
 use ethernetip::types::{CipType, CipValue};
 
@@ -67,7 +67,7 @@ fn test_build_read_fragmented_request() {
 fn test_build_get_attribute_single_request() {
     let cip = build_get_attribute_single_request(0x06, 0x01, 0x03, None);
     assert_eq!(cip[0], CipService::GetAttributeSingle as u8);
-    assert_eq!(cip[1], 3); // word count for class+instance+attribute
+    assert_eq!(cip[1], 3);
     assert_eq!(cip[2], 0x20);
     assert_eq!(cip[3], 0x06);
     assert_eq!(cip[4], 0x24);
@@ -80,7 +80,7 @@ fn test_build_get_attribute_single_request() {
 fn test_build_get_attribute_single_request_slot() {
     let cip = build_get_attribute_single_request(0x06, 0x01, 0x03, Some(2));
     assert_eq!(cip[0], CipService::GetAttributeSingle as u8);
-    assert_eq!(cip[1], 5); // word count for port segment + object path
+    assert_eq!(cip[1], 5);
     assert_eq!(cip[2], 0x01);
     assert_eq!(cip[3], 2);
     assert_eq!(cip[6], 0x20);
@@ -91,7 +91,7 @@ fn test_build_get_attribute_single_request_slot() {
 fn test_build_get_attribute_all_request() {
     let cip = build_get_attribute_all_request(0x02, 0x01, None);
     assert_eq!(cip[0], CipService::GetAttributeAll as u8);
-    assert_eq!(cip[1], 2); // word count for class + instance
+    assert_eq!(cip[1], 2);
     assert_eq!(cip[2], 0x20);
     assert_eq!(cip[3], 0x02);
     assert_eq!(cip[4], 0x24);
@@ -102,7 +102,7 @@ fn test_build_get_attribute_all_request() {
 fn test_build_get_attribute_all_request_slot() {
     let cip = build_get_attribute_all_request(0x02, 0x01, Some(3));
     assert_eq!(cip[0], CipService::GetAttributeAll as u8);
-    assert_eq!(cip[1], 4); // word count for port segment + class + instance
+    assert_eq!(cip[1], 4);
     assert_eq!(cip[2], 0x01);
     assert_eq!(cip[3], 3);
     assert_eq!(cip[6], 0x20);
@@ -111,24 +111,16 @@ fn test_build_get_attribute_all_request_slot() {
 
 #[test]
 fn test_forward_open_request_structure() {
-    let cip = build_forward_open_request(Some(2), ConnectionParams::default());
+    let cip = build_forward_open_request(
+        Some(2),
+        ConnectionParams::default(),
+        ConnectionIds::default(),
+    );
     assert_eq!(cip[0], CipService::ForwardOpen as u8);
 
     let epath_end = parse_epath_len(&cip);
 
-    let idx = epath_end
-        + 2  // priority/timeout
-        + 4  // O->T ID
-        + 4  // T->O ID
-        + 2  // serial
-        + 2  // vendor
-        + 4  // originator serial
-        + 1  // timeout multiplier
-        + 3  // reserved
-        + 4  // O->T RPI
-        + 2  // O->T params
-        + 4  // T->O RPI
-        + 2; // T->O params
+    let idx = epath_end + 2 + 4 + 4 + 2 + 2 + 4 + 1 + 3 + 4 + 2 + 4 + 2;
 
     let tct = cip[idx];
     assert_eq!(tct, 0xA3);
@@ -136,21 +128,16 @@ fn test_forward_open_request_structure() {
 
 #[test]
 fn test_large_forward_open_request_structure() {
-    let cip = build_large_forward_open_request(Some(3), ConnectionParams::default());
+    let cip = build_large_forward_open_request(
+        Some(3),
+        ConnectionParams::default(),
+        ConnectionIds::default(),
+    );
     assert_eq!(cip[0], CipService::LargeForwardOpen as u8);
 
     let epath_end = parse_epath_len(&cip);
 
-    let params_index = epath_end
-        + 2  // priority/timeout
-        + 4  // O->T ID
-        + 4  // T->O ID
-        + 2  // serial
-        + 2  // vendor
-        + 4  // originator serial
-        + 1  // timeout multiplier
-        + 3  // reserved
-        + 4; // O->T RPI
+    let params_index = epath_end + 2 + 4 + 4 + 2 + 2 + 4 + 1 + 3 + 4;
 
     let params = u32::from_le_bytes([
         cip[params_index],
@@ -164,7 +151,7 @@ fn test_large_forward_open_request_structure() {
 
 #[test]
 fn test_forward_close_request() {
-    let cip = build_forward_close_request(Some(1));
+    let cip = build_forward_close_request(Some(1), ConnectionIds::default());
     assert_eq!(cip[0], CipService::ForwardClose as u8);
 
     let epath_end = parse_epath_len(&cip);
@@ -175,7 +162,7 @@ fn test_forward_close_request() {
 
 #[test]
 fn test_large_forward_close_request() {
-    let cip = build_large_forward_close_request(Some(1));
+    let cip = build_large_forward_close_request(Some(1), ConnectionIds::default());
     assert_eq!(cip[0], CipService::LargeForwardClose as u8);
 
     let epath_end = parse_epath_len(&cip);
@@ -186,14 +173,19 @@ fn test_large_forward_close_request() {
 
 #[test]
 fn test_forward_open_slot_routing() {
-    let cip = build_forward_open_request(Some(5), ConnectionParams::default());
+    let cip = build_forward_open_request(
+        Some(5),
+        ConnectionParams::default(),
+        ConnectionIds::default(),
+    );
     assert_eq!(cip[2], 0x01);
     assert_eq!(cip[3], 5);
 }
 
 #[test]
 fn test_connection_manager_path_no_slot() {
-    let cip = build_forward_open_request(None, ConnectionParams::default());
+    let cip =
+        build_forward_open_request(None, ConnectionParams::default(), ConnectionIds::default());
     assert_eq!(cip[2], 0x20);
     assert_eq!(cip[3], 0x06);
 }
@@ -207,11 +199,10 @@ fn test_forward_open_custom_trigger() {
         trigger: TransportTrigger::Class3ClientInitiated,
     };
 
-    let cip = build_forward_open_request(Some(1), params);
+    let cip = build_forward_open_request(Some(1), params, ConnectionIds::default());
 
     let epath_end = parse_epath_len(&cip);
 
-    // Transport Trigger offset:
     let tct_offset = epath_end + 2 + 4 + 4 + 2 + 2 + 4 + 1 + 3 + 4 + 2 + 4 + 2;
 
     assert_eq!(cip[tct_offset], 0xA3);
@@ -225,12 +216,7 @@ fn test_transport_trigger_default() {
 
 #[test]
 fn test_decode_extended_status() {
-    // Fake CIP response: general status OK, 2 extended words: 0x0205, 0x0315
-    let res = [
-        0x00, 0x00, 0x00, 0x02, // header: ext count = 2
-        0x05, 0x02, // 0x0205 = invalid RPI
-        0x15, 0x03, // 0x0315 = insufficient resources
-    ];
+    let res = [0x00, 0x00, 0x00, 0x02, 0x05, 0x02, 0x15, 0x03];
 
     let ext = decode_extended_status(&res);
     assert_eq!(ext, vec![0x0205, 0x0315]);

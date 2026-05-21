@@ -64,8 +64,12 @@ impl TagReadWrite for EthernetIpClient {
         instance_id: u8,
         attribute_id: u8,
     ) -> Result<CipValue, CipError> {
-        let cip =
-            build_get_attribute_single_request(class_id, instance_id, attribute_id, self.slot);
+        let cip = build_get_attribute_single_request(
+            class_id as u16,
+            instance_id as u16,
+            attribute_id as u16,
+            self.slot,
+        );
 
         let res = self
             .route_cip_request(cip)
@@ -82,7 +86,7 @@ impl TagReadWrite for EthernetIpClient {
         class_id: u8,
         instance_id: u8,
     ) -> Result<Vec<u8>, CipError> {
-        let cip = build_get_attribute_all_request(class_id, instance_id, self.slot);
+        let cip = build_get_attribute_all_request(class_id as u16, instance_id as u16, self.slot);
 
         let res = self
             .route_cip_request(cip)

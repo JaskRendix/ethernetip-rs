@@ -1,15 +1,21 @@
+pub mod builder;
+pub mod connection;
 pub mod epath;
 pub mod error;
 pub mod msp;
-pub mod read_write;
+pub mod path;
+pub mod payload;
 pub mod service;
 pub mod symbol;
 
 use crate::types::CipValue;
+pub use builder::*;
+pub use connection::*;
 pub use epath::*;
 pub use error::*;
 pub use msp::*;
-pub use read_write::*;
+pub use path::*;
+pub use payload::*;
 pub use service::*;
 pub use symbol::*;
 

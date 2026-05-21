@@ -4,8 +4,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::cip::{
     build_forward_close_request, build_forward_open_request, build_large_forward_close_request,
-    build_large_forward_open_request, decode_extended_status, map_extended_status,
-    ForwardOpenError,
+    build_large_forward_open_request, decode_extended_status, describe_extended_status,
+    ConnectionIds, ForwardOpenError,
 };
 use crate::client::UnconnectedMessaging;
 use crate::encapsulation::*;
@@ -15,7 +15,8 @@ use super::{ConnectedMessaging, EthernetIpClient};
 #[async_trait::async_trait]
 impl ConnectedMessaging for EthernetIpClient {
     async fn forward_open(&mut self) -> Result<(), ForwardOpenError> {
-        let cip = build_forward_open_request(self.slot, self.connection_params);
+        let ids = ConnectionIds::default();
+        let cip = build_forward_open_request(self.slot, self.connection_params, ids);
 
         let res = if self.connected {
             self.send_unit_data(cip).await?
@@ -23,7 +24,6 @@ impl ConnectedMessaging for EthernetIpClient {
             self.send_rr_data(cip).await?
         };
 
-        // Minimum: service (0), reserved (1), general status (2), ext count (3)
         if res.len() < 4 {
             return Err(ForwardOpenError::Other(
                 "ForwardOpen response too short".into(),
@@ -44,7 +44,9 @@ impl ConnectedMessaging for EthernetIpClient {
             let ext = decode_extended_status(&res);
 
             if !ext.is_empty() {
-                return Err(map_extended_status(&ext));
+                if let Some(mapped) = describe_extended_status(&ext) {
+                    return Err(ForwardOpenError::Other(mapped));
+                }
             }
             return Err(ForwardOpenError::GeneralStatus(general));
         }
@@ -68,7 +70,8 @@ impl ConnectedMessaging for EthernetIpClient {
             return Ok(());
         }
 
-        let cip = build_forward_close_request(self.slot);
+        let ids = ConnectionIds::default();
+        let cip = build_forward_close_request(self.slot, ids);
 
         if self.connected {
             let _ = self.send_unit_data(cip).await;
@@ -83,7 +86,8 @@ impl ConnectedMessaging for EthernetIpClient {
     }
 
     async fn large_forward_open(&mut self) -> io::Result<()> {
-        let cip = build_large_forward_open_request(self.slot, self.connection_params);
+        let ids = ConnectionIds::default();
+        let cip = build_large_forward_open_request(self.slot, self.connection_params, ids);
 
         let res = if self.connected {
             self.send_unit_data(cip).await?
@@ -131,7 +135,8 @@ impl ConnectedMessaging for EthernetIpClient {
             return Ok(());
         }
 
-        let cip = build_large_forward_close_request(self.slot);
+        let ids = ConnectionIds::default();
+        let cip = build_large_forward_close_request(self.slot, ids);
 
         if self.connected {
             let _ = self.send_unit_data(cip).await;
@@ -146,8 +151,9 @@ impl ConnectedMessaging for EthernetIpClient {
     }
 
     async fn forward_open_with_fallback(&mut self) -> io::Result<()> {
+        let ids = ConnectionIds::default();
         let res = {
-            let cip = build_large_forward_open_request(self.slot, self.connection_params);
+            let cip = build_large_forward_open_request(self.slot, self.connection_params, ids);
             if self.connected {
                 self.send_unit_data(cip).await
             } else {
@@ -182,7 +188,6 @@ impl ConnectedMessaging for EthernetIpClient {
             .ok_or_else(|| io::Error::other("No active ForwardOpen connection"))?;
 
         let seq = self.sequence;
-        // Avoid sequence 0 on wrap
         self.sequence = if self.sequence == u16::MAX {
             1
         } else {
