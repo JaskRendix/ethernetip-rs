@@ -22,11 +22,22 @@ impl Discovery for DiscoveryImpl {
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
         socket.set_broadcast(true)?;
 
-        // Send ListIdentity request
+        // Join CIP multicast group (239.192.1.1)
+        let _ = socket.join_multicast_v4(
+            std::net::Ipv4Addr::new(239, 192, 1, 1),
+            std::net::Ipv4Addr::new(0, 0, 0, 0),
+        );
+
+        // Send ListIdentity request via broadcast
         let msg = EncapsulationHeader::new(COMMAND_LIST_IDENTITY, 0, 0).to_bytes();
         socket
             .send_to(&msg, SocketAddr::from(([255, 255, 255, 255], ENIP_PORT)))
             .await?;
+
+        // Send ListIdentity request via multicast
+        let _ = socket
+            .send_to(&msg, SocketAddr::from(([239, 192, 1, 1], ENIP_PORT)))
+            .await;
 
         let mut results = Vec::new();
         let mut buf = [0u8; 2048];
@@ -87,6 +98,14 @@ impl Discovery for DiscoveryImpl {
         }
 
         Ok(results)
+    }
+}
+
+impl DiscoveryImpl {
+    /// Return the first discovered device, if any.
+    pub async fn discover_one() -> io::Result<Option<DiscoveredIdentity>> {
+        let all = Self::discover().await?;
+        Ok(all.into_iter().next())
     }
 }
 
