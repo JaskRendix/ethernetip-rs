@@ -112,3 +112,113 @@ fn round_trip_build_and_parse() {
     assert_eq!(syms[0].name, "Foo");
     assert_eq!(syms[0].typ, CipType::DInt);
 }
+
+#[test]
+fn skip_unknown_type() {
+    let buf = vec![
+        0x00, 0x00, 0x03, b'X', b'Y', b'Z', 0x00, 0x00, 0x00, 0xFF, 0x00, // unknown type
+        0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let syms = parse_symbol_browse_response(&buf);
+    assert!(syms.is_empty());
+}
+
+#[test]
+fn parse_array_dims() {
+    let buf = vec![
+        0x00, 0x00, 0x03, b'A', b'r', b'r', 0x00, 0x00, 0x00, 0xC4, 0x00, 0x00, 0x00,
+        0x03, // 3 dims
+        0x05, 0x00, // dim0 = 5
+        0x02, 0x00, // dim1 = 2
+        0x01, 0x00, // dim2 = 1
+        0x00, 0x00,
+    ];
+
+    let syms = parse_symbol_browse_response(&buf);
+    assert_eq!(syms.len(), 1);
+    assert_eq!(syms[0].array_dims, Some((5, 2, 1)));
+}
+
+#[test]
+fn multiple_terminators() {
+    let buf = vec![
+        0x00, 0x00, 0x03, b'A', b'B', b'C', 0x00, 0x00, 0x00, 0xC1, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, // terminator
+        0x00, 0x00, // extra terminator
+    ];
+
+    let syms = parse_symbol_browse_response(&buf);
+    assert_eq!(syms.len(), 1);
+}
+
+#[test]
+fn zero_length_name() {
+    let buf = vec![
+        0x00, 0x00, 0x00, // name_len = 0
+        0x00, 0x00, 0xC1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let syms = parse_symbol_browse_response(&buf);
+    assert_eq!(syms.len(), 1);
+    assert_eq!(syms[0].name, "");
+}
+
+#[test]
+fn truncated_symbol_does_not_panic() {
+    let buf = vec![
+        0x00, 0x00, 0x04, b'T', b'e', b's', // missing last byte
+    ];
+
+    let syms = parse_symbol_browse_response(&buf);
+    assert!(syms.is_empty());
+}
+
+proptest! {
+    #[test]
+    fn fuzz_symbol_structure(
+        name in "[A-Za-z]{0,20}",
+        dims in prop::collection::vec(0u16..10u16, 0..3),
+        typ in prop_oneof![
+            Just(CipType::Bool),
+            Just(CipType::DInt),
+            Just(CipType::Real),
+        ]
+    ) {
+        let mut buf = Vec::new();
+
+        buf.extend_from_slice(&0x0000u16.to_le_bytes());
+        buf.push(name.len() as u8);
+        buf.extend_from_slice(name.as_bytes());
+        if name.len() % 2 != 0 {
+            buf.push(0);
+        }
+
+        buf.extend_from_slice(&0x0000u16.to_le_bytes());
+        buf.push(typ as u8);
+        buf.push(0x00);
+
+        buf.extend_from_slice(&0x0000u16.to_le_bytes());
+        buf.push(dims.len() as u8);
+        for d in &dims {
+            buf.extend_from_slice(&d.to_le_bytes());
+        }
+
+        let syms = parse_symbol_browse_response(&buf);
+        prop_assert!(syms.len() <= 1);
+    }
+}
+
+#[test]
+fn dims_with_padding() {
+    let buf = vec![
+        0x00, 0x00, 0x03, b'F', b'o', b'o', 0x00, 0x00, 0x00, 0xC4, 0x00, 0x00, 0x00,
+        0x01, // 1 dim
+        0x05, 0x00, 0x00, // extra padding byte
+        0x00, 0x00,
+    ];
+
+    let syms = parse_symbol_browse_response(&buf);
+    assert_eq!(syms.len(), 1);
+    assert_eq!(syms[0].array_dims, Some((5, 0, 0)));
+}
