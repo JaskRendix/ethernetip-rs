@@ -23,24 +23,39 @@ impl ConnectedMessaging for EthernetIpClient {
             self.send_rr_data(cip).await?
         };
 
-        if res.len() < 10 {
+        // Minimum: service (0), reserved (1), general status (2), ext count (3)
+        if res.len() < 4 {
             return Err(ForwardOpenError::Other(
                 "ForwardOpen response too short".into(),
             ));
         }
 
-        let status = res[2];
-        if status != 0 {
+        let general = res[2];
+        let ext_words = res[3] as usize;
+        let ext_bytes = 4 + ext_words * 2;
+
+        if res.len() < ext_bytes + 4 {
+            return Err(ForwardOpenError::Other(
+                "ForwardOpen response missing connection ID".into(),
+            ));
+        }
+
+        if general != 0 {
             let ext = decode_extended_status(&res);
 
             if !ext.is_empty() {
                 return Err(map_extended_status(&ext));
             }
-
-            return Err(ForwardOpenError::GeneralStatus(status));
+            return Err(ForwardOpenError::GeneralStatus(general));
         }
 
-        let conn_id = u32::from_le_bytes([res[6], res[7], res[8], res[9]]);
+        let conn_id = u32::from_le_bytes([
+            res[ext_bytes],
+            res[ext_bytes + 1],
+            res[ext_bytes + 2],
+            res[ext_bytes + 3],
+        ]);
+
         self.connection_id = Some(conn_id);
         self.sequence = 1;
         self.connected = true;
@@ -76,19 +91,34 @@ impl ConnectedMessaging for EthernetIpClient {
             self.send_rr_data(cip).await?
         };
 
-        if res.len() < 10 {
+        if res.len() < 4 {
             return Err(io::Error::other("LargeForwardOpen response too short"));
         }
 
-        let status = res[2];
-        if status != 0 {
+        let general = res[2];
+        let ext_words = res[3] as usize;
+        let ext_bytes = 4 + ext_words * 2;
+
+        if res.len() < ext_bytes + 4 {
+            return Err(io::Error::other(
+                "LargeForwardOpen response missing connection ID",
+            ));
+        }
+
+        if general != 0 {
             return Err(io::Error::other(format!(
                 "LargeForwardOpen failed: 0x{:02X}",
-                status
+                general
             )));
         }
 
-        let conn_id = u32::from_le_bytes([res[6], res[7], res[8], res[9]]);
+        let conn_id = u32::from_le_bytes([
+            res[ext_bytes],
+            res[ext_bytes + 1],
+            res[ext_bytes + 2],
+            res[ext_bytes + 3],
+        ]);
+
         self.connection_id = Some(conn_id);
         self.sequence = 1;
         self.connected = true;
@@ -127,7 +157,6 @@ impl ConnectedMessaging for EthernetIpClient {
 
         match res {
             Ok(_) => return Ok(()),
-
             Err(e) => {
                 let msg = e.to_string();
 
@@ -153,9 +182,14 @@ impl ConnectedMessaging for EthernetIpClient {
             .ok_or_else(|| io::Error::other("No active ForwardOpen connection"))?;
 
         let seq = self.sequence;
-        self.sequence = self.sequence.wrapping_add(1);
+        // Avoid sequence 0 on wrap
+        self.sequence = if self.sequence == u16::MAX {
+            1
+        } else {
+            self.sequence.wrapping_add(1)
+        };
 
-        let mut rr = Vec::new();
+        let mut rr = Vec::with_capacity(4 + 2 + cip.len());
         rr.extend_from_slice(&conn_id.to_le_bytes());
         rr.extend_from_slice(&seq.to_le_bytes());
         rr.extend_from_slice(&cip);
@@ -173,6 +207,12 @@ impl ConnectedMessaging for EthernetIpClient {
         self.stream.read_exact(&mut h_buf).await?;
         let h = EncapsulationHeader::from_bytes(&h_buf)
             .ok_or_else(|| io::Error::other("Bad encapsulation header"))?;
+
+        if h.command != COMMAND_SEND_UNIT_DATA {
+            return Err(io::Error::other(
+                "Unexpected encapsulation command in response",
+            ));
+        }
 
         let mut d = vec![0u8; h.length as usize];
         self.stream.read_exact(&mut d).await?;
