@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CipType {
     Bool = 0xC1,
@@ -64,6 +66,24 @@ pub struct DiscoveredIdentity {
     pub status: u16,
     pub serial: u32,
     pub product_name: String,
+}
+
+impl fmt::Display for DiscoveredIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} — {} (Vendor: {}, Type: {}, Code: {}, Rev: {}.{}, Serial: {}, Status: 0x{:04X})",
+            self.ip,
+            self.product_name,
+            self.vendor_id,
+            self.device_type,
+            self.product_code,
+            self.revision_major,
+            self.revision_minor,
+            self.serial,
+            self.status
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
