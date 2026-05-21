@@ -270,4 +270,97 @@ mod tests {
         assert_eq!(info.status, 0x0304);
         assert_eq!(info.configuration_capability, 0x0506);
     }
+
+    #[test]
+    fn test_ciptype_roundtrip() {
+        for (raw, typ) in [
+            (0xC1, CipType::Bool),
+            (0xC2, CipType::SInt),
+            (0xC3, CipType::Int),
+            (0xC4, CipType::DInt),
+            (0xC5, CipType::LInt),
+            (0xCA, CipType::Real),
+            (0xD0, CipType::String),
+            (0xD3, CipType::BoolPacked),
+        ] {
+            assert_eq!(CipType::from_u8(raw), Some(typ));
+            assert_eq!(CipType::from_u16(raw as u16), Some(typ));
+        }
+    }
+
+    #[test]
+    fn test_identity_info_decode_too_short() {
+        let raw = vec![0u8; 5];
+        assert!(IdentityInfo::decode(&raw).is_err());
+    }
+
+    #[test]
+    fn test_identity_info_decode_name_too_short() {
+        let mut raw = vec![0u8; 2 + 2 + 2 + 2 + 2 + 4];
+        raw.extend_from_slice(&10u16.to_le_bytes()); // claims name length 10
+        raw.extend_from_slice(&[1, 2, 3]); // only 3 bytes
+        assert!(IdentityInfo::decode(&raw).is_err());
+    }
+
+    #[test]
+    fn test_connection_manager_info_decode_too_short() {
+        let raw = vec![0x01, 0x02, 0x03];
+        assert!(ConnectionManagerInfo::decode(&raw).is_err());
+    }
+
+    #[test]
+    fn test_cipvalue_type_name() {
+        assert_eq!(CipValue::Bool(true).type_name(), "BOOL");
+        assert_eq!(CipValue::SInt(1).type_name(), "SINT");
+        assert_eq!(CipValue::Int(1).type_name(), "INT");
+        assert_eq!(CipValue::DInt(1).type_name(), "DINT");
+        assert_eq!(CipValue::LInt(1).type_name(), "LINT");
+        assert_eq!(CipValue::Real(1.0).type_name(), "REAL");
+        assert_eq!(CipValue::String("x".into()).type_name(), "STRING");
+        assert_eq!(CipValue::BoolPacked(vec![1]).type_name(), "BOOL_PACKED");
+        assert_eq!(CipValue::Unit.type_name(), "UNIT");
+    }
+
+    #[test]
+    fn test_multiresult_variants() {
+        let ok = MultiResult::Ok(123);
+        let err: MultiResult<()> = MultiResult::Err(0x05);
+
+        assert!(matches!(ok, MultiResult::Ok(_)));
+        assert!(matches!(err, MultiResult::Err(0x05)));
+    }
+
+    #[test]
+    fn test_symbolinfo_basic() {
+        let s = SymbolInfo {
+            name: "Tag".into(),
+            typ: CipType::DInt,
+            array_dims: Some((10, 0, 0)),
+        };
+
+        assert_eq!(s.name, "Tag");
+        assert_eq!(s.typ, CipType::DInt);
+        assert_eq!(s.array_dims, Some((10, 0, 0)));
+    }
+    #[test]
+    fn test_identity_info_decode_exact_boundary() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&1u16.to_le_bytes()); // vendor
+        raw.extend_from_slice(&2u16.to_le_bytes()); // type
+        raw.extend_from_slice(&3u16.to_le_bytes()); // code
+        raw.extend_from_slice(&[1, 2]); // revision
+        raw.extend_from_slice(&4u16.to_le_bytes()); // status
+        raw.extend_from_slice(&5u32.to_le_bytes()); // serial
+
+        let name = b"A";
+        raw.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        raw.extend_from_slice(name);
+
+        raw.extend(std::iter::repeat_n(0, 82 - name.len()));
+        raw.push(7); // state
+
+        let info = IdentityInfo::decode(&raw).unwrap();
+        assert_eq!(info.product_name, "A");
+        assert_eq!(info.state, 7);
+    }
 }
