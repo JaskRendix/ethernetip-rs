@@ -196,7 +196,7 @@ fn decode_fragmented_string() {
     ];
 
     // Fragment 2: "llo"
-    let frag2 = [b'l', b'l', b'o'];
+    let frag2 = *b"llo";
 
     let type_id = u16::from_le_bytes([frag1[0], frag1[1]]);
 
