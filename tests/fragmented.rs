@@ -77,3 +77,20 @@ fn fragmented_misaligned_payload() {
     // Only the first element should decode
     assert_eq!(vals, vec![CipValue::DInt(1)]);
 }
+
+#[test]
+fn decode_single_fragment_no_fragmentation_needed() {
+    // Confirms the simple case still works: everything fits in one response,
+    // no actual fragmentation happens.
+    let payload = [42, 0, 0, 0]; // one DINT
+    let vals = decode_cip_data_list(0x00C4, &payload);
+    assert_eq!(vals, vec![CipValue::DInt(42)]);
+}
+
+#[test]
+fn decode_exact_boundary_no_trailing_bytes() {
+    // Two full DINTs, exactly 8 bytes, no leftover/misaligned bytes.
+    let payload = [1, 0, 0, 0, 2, 0, 0, 0];
+    let vals = decode_cip_data_list(0x00C4, &payload);
+    assert_eq!(vals, vec![CipValue::DInt(1), CipValue::DInt(2)]);
+}

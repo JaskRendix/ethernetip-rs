@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CipError {
     ConnectionFailure,
     ResourceUnavailable,
@@ -12,6 +12,11 @@ pub enum CipError {
         expected: &'static str,
         actual: &'static str,
     },
+    General {
+        status: u8,
+        extended: Vec<u16>,
+    },
+    Io(String),
 }
 
 impl From<u8> for CipError {
@@ -27,24 +32,36 @@ impl From<u8> for CipError {
     }
 }
 
+impl From<std::io::Error> for CipError {
+    fn from(err: std::io::Error) -> Self {
+        CipError::Io(err.to_string())
+    }
+}
+
 impl fmt::Display for CipError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CipError::ConnectionFailure => write!(f, "Connection failure (0x01)"),
-
             CipError::ResourceUnavailable => write!(f, "Resource unavailable (0x02)"),
-
             CipError::InvalidAttribute => write!(f, "Invalid attribute (0x04)"),
-
             CipError::PathSegmentError => write!(f, "Path segment error (0x05)"),
-
             CipError::PathDestinationUnknown => write!(f, "Path destination unknown (0x06)"),
-
             CipError::VendorSpecific(code) => write!(f, "Vendor-specific CIP error 0x{:02X}", code),
-
             CipError::TypeMismatch { expected, actual } => {
                 write!(f, "Type mismatch: expected {expected}, got {actual}")
             }
+            CipError::General { status, extended } => {
+                if extended.is_empty() {
+                    write!(f, "General CIP error 0x{:02X}", status)
+                } else {
+                    write!(
+                        f,
+                        "General CIP error 0x{:02X}, extended: {:?}",
+                        status, extended
+                    )
+                }
+            }
+            CipError::Io(msg) => write!(f, "IO error: {msg}"),
         }
     }
 }
@@ -67,19 +84,12 @@ impl fmt::Display for ForwardOpenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ForwardOpenError::GeneralStatus(code) => write!(f, "General status 0x{:02X}", code),
-
             ForwardOpenError::ExtendedStatus(words) => write!(f, "Extended status {:?}", words),
-
             ForwardOpenError::InvalidRpi => write!(f, "Invalid RPI"),
-
             ForwardOpenError::InvalidSize => write!(f, "Invalid connection size"),
-
             ForwardOpenError::ResourceUnavailable => write!(f, "Resource unavailable"),
-
             ForwardOpenError::UnsupportedTrigger => write!(f, "Unsupported transport trigger"),
-
             ForwardOpenError::Timeout => write!(f, "Connection timeout"),
-
             ForwardOpenError::Other(msg) => write!(f, "{msg}"),
         }
     }
@@ -90,6 +100,8 @@ impl From<std::io::Error> for ForwardOpenError {
         ForwardOpenError::Other(err.to_string())
     }
 }
+
+impl std::error::Error for ForwardOpenError {}
 
 pub fn map_extended_status(words: &[u16]) -> ForwardOpenError {
     if words.is_empty() {

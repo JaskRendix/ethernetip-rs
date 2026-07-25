@@ -1,11 +1,16 @@
 use std::io;
 
-use crate::cip::CipError;
+use crate::cip::{decode_extended_status, CipError};
 use crate::client::build_read_fragmented_request;
 use crate::client::{ConnectedMessaging, UnconnectedMessaging};
 use crate::types::CipValue;
 
 use super::{EthernetIpClient, FragmentedRead};
+
+/// Safety cap on total fragments to avoid an unbounded loop against a
+/// misbehaving or malicious device that keeps returning "more data" status
+/// without making progress or without ever completing.
+const MAX_FRAGMENTS: usize = 4096;
 
 #[async_trait::async_trait]
 impl FragmentedRead for EthernetIpClient {
@@ -17,21 +22,32 @@ impl FragmentedRead for EthernetIpClient {
         let mut all_data = Vec::new();
         let mut offset: u32 = 0;
         let mut type_id: u16 = 0;
+        let mut fragments: usize = 0;
 
         loop {
+            fragments += 1;
+            if fragments > MAX_FRAGMENTS {
+                return Err(CipError::General {
+                    status: 0xFF,
+                    extended: vec![],
+                });
+            }
+
             let cip = build_read_fragmented_request(tag, count, offset, self.slot);
 
-            // Explicit type annotation fixes E0282
             let res: io::Result<Vec<u8>> = if self.connected {
                 self.send_unit_data(cip).await
             } else {
                 self.send_rr_data(cip).await
             };
 
-            let res = res.map_err(|_| CipError::VendorSpecific(0xFF))?;
+            let res = res.map_err(CipError::from)?; // preserves the real IO error now
 
             if res.len() < 4 {
-                return Err(CipError::VendorSpecific(0xFE));
+                return Err(CipError::General {
+                    status: 0xFE,
+                    extended: vec![],
+                });
             }
 
             let general_status = res[2];
@@ -39,14 +55,20 @@ impl FragmentedRead for EthernetIpClient {
             let data_start = 4 + (ext_words * 2);
 
             if res.len() < data_start {
-                return Err(CipError::VendorSpecific(0xFD));
+                return Err(CipError::General {
+                    status: 0xFD,
+                    extended: vec![],
+                });
             }
 
             let mut payload = &res[data_start..];
 
             if offset == 0 {
                 if payload.len() < 2 {
-                    return Err(CipError::VendorSpecific(0xFC));
+                    return Err(CipError::General {
+                        status: 0xFC,
+                        extended: vec![],
+                    });
                 }
                 type_id = u16::from_le_bytes([payload[0], payload[1]]);
                 payload = &payload[2..];
@@ -56,8 +78,23 @@ impl FragmentedRead for EthernetIpClient {
 
             match general_status {
                 0x00 => break,
-                0x06 => offset = all_data.len() as u32,
-                other => return Err(CipError::from(other)),
+                0x06 => {
+                    let new_offset = all_data.len() as u32;
+                    if new_offset == offset {
+                        return Err(CipError::General {
+                            status: 0x06,
+                            extended: vec![],
+                        });
+                    }
+                    offset = new_offset;
+                }
+                other => {
+                    let extended = decode_extended_status(&res[..data_start]);
+                    return Err(CipError::General {
+                        status: other,
+                        extended,
+                    });
+                }
             }
         }
 
