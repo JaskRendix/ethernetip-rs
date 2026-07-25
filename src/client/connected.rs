@@ -151,21 +151,21 @@ impl ConnectedMessaging for EthernetIpClient {
     }
 
     async fn forward_open_with_fallback(&mut self) -> io::Result<()> {
-        let ids = ConnectionIds::default();
-        let res = {
-            let cip = build_large_forward_open_request(self.slot, self.connection_params, ids);
-            if self.connected {
-                self.send_unit_data(cip).await
-            } else {
-                self.send_rr_data(cip).await
-            }
-        };
-
-        match res {
-            Ok(_) => return Ok(()),
+        // Try Large Forward Open first. large_forward_open() already parses
+        // the response and sets connection_id/sequence/connected on success,
+        // so delegate to it rather than re-sending the request by hand here
+        // (a prior version of this function sent the request directly and
+        // discarded the response, leaving connection state unset on success).
+        match self.large_forward_open().await {
+            Ok(()) => return Ok(()),
             Err(e) => {
                 let msg = e.to_string();
 
+                // TODO: this matches on formatted error text from
+                // large_forward_open()'s "LargeForwardOpen failed: 0x{:02X}"
+                // string. It works today but is fragile if that format
+                // string ever changes. Prefer a typed status code once
+                // large_forward_open() can return one instead of io::Error.
                 let should_fallback = msg.contains("0x01")
                     || msg.contains("0x20")
                     || msg.contains("0x26")
