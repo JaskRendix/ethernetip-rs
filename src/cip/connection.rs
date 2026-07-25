@@ -79,9 +79,19 @@ pub struct ConnectionIds {
 impl Default for ConnectionIds {
     fn default() -> Self {
         Self {
-            serial: NEXT_SERIAL.fetch_add(1, Ordering::Relaxed),
-            vendor: 0x0013, // Rockwell Automation vendor ID placeholder
+            serial: 1,
+            vendor: 0x0013,
             originator_serial: 0x1234_5678,
+        }
+    }
+}
+
+impl ConnectionIds {
+    /// Like `default()` but pulls a fresh serial from the process-wide counter.
+    pub fn next() -> Self {
+        Self {
+            serial: NEXT_SERIAL.fetch_add(1, Ordering::Relaxed),
+            ..Self::default()
         }
     }
 }
@@ -110,4 +120,25 @@ pub fn message_router_path(slot: Option<u8>) -> Vec<u8> {
     segs.push(PathSegment::Class(0x02)); // Message Router
     segs.push(PathSegment::Instance(0x01)); // Instance 1
     encode_path(&segs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_connection_ids_default_is_deterministic() {
+        let a = ConnectionIds::default();
+        let b = ConnectionIds::default();
+        assert_eq!(a.serial, 1);
+        assert_eq!(b.serial, 1);
+    }
+
+    #[test]
+    fn test_connection_ids_next_increments() {
+        let a = ConnectionIds::next();
+        let b = ConnectionIds::next();
+        assert_ne!(a.serial, b.serial);
+        assert!(b.serial > a.serial);
+    }
 }
